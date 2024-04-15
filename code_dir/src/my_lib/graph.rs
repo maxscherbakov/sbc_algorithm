@@ -2,19 +2,19 @@ use crate::my_lib::chunk::Chunk;
 use crate::my_lib::Edge;
 
 pub(super) struct Graph<'a> {
-    count_vertices: u32,
+    vertex_count: u32,
     parent: Vec<usize>,
     rank: Vec<u32>,
-    edges: &'a [Edge],
+    edges: &'a Vec<Edge>,
 }
 
 impl Graph<'_> {
-    pub(crate) fn new(graph_count_vertices: usize, graph_edges: &[Edge]) -> Graph {
+    pub(crate) fn new(vertex_count: usize, edges: &Vec<Edge>) -> Graph {
         Graph {
-            count_vertices: graph_count_vertices as u32,
-            parent: (0..graph_count_vertices).collect(),
-            rank: vec![0u32; graph_count_vertices],
-            edges: graph_edges,
+            vertex_count: vertex_count as u32,
+            parent: (0..vertex_count).collect(),
+            rank: vec![0u32; vertex_count],
+            edges,
         }
     }
 
@@ -48,7 +48,7 @@ impl Graph<'_> {
             }
         }
 
-        let mut cluster: Vec<Vec<&dyn Chunk>> = vec![Vec::new(); self.count_vertices as usize];
+        let mut cluster: Vec<Vec<&dyn Chunk>> = vec![Vec::new(); self.vertex_count as usize];
         for (index_chunk, leader_index) in self.parent.iter().enumerate() {
             cluster[*leader_index].push(chunks[index_chunk]);
         }

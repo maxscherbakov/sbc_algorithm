@@ -32,7 +32,7 @@ fn main() {
     }
 
     let mut chunks_with_delta_code: Vec<ChunkWithDeltaCode> = Vec::new();
-    encoding(chunks.as_mut_slice(), &mut chunks_with_delta_code);
+    encode(chunks.as_mut_slice(), &mut chunks_with_delta_code);
 
     for chunk in chunks {
         chunk.decode();

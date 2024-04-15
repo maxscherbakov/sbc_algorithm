@@ -13,11 +13,11 @@ pub(crate) struct DeltaAction {
     pub(crate) byte_value: u8,
 }
 
-pub(crate) fn coding(chunk_x: &dyn Chunk, chunk_y: &dyn Chunk) -> Vec<DeltaAction> {
+pub(crate) fn delta_encode(chunk_x: &dyn Chunk, chunk_y: &dyn Chunk) -> Vec<DeltaAction> {
     let data_chunk_x = chunk_x.get_data();
     let data_chunk_y = chunk_y.get_data();
-    let matrix = levenshtein_matrix(data_chunk_y.as_slice(), data_chunk_x.as_slice());
-    let mut delta_code_for_chunk_x: Vec<DeltaAction> = Vec::new();
+    let matrix = levenshtein_matrix(&data_chunk_y, &data_chunk_x);
+    let mut delta_code_for_chunk_x = Vec::new();
     let mut x = data_chunk_x.len();
     let mut y = data_chunk_y.len();
     while x > 0 && y > 0 {

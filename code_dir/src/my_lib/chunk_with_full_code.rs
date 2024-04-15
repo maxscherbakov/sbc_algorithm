@@ -29,14 +29,14 @@ impl Chunk for ChunkWithFullCode {
 
 impl ChunkWithFullCode {
     pub(crate) fn new(
-        chunk_index: usize,
-        chunk_size: usize,
-        chunk_data: Vec<u8>,
+        index: usize,
+        size: usize,
+        data: Vec<u8>,
     ) -> ChunkWithFullCode {
         ChunkWithFullCode {
-            index: chunk_index,
-            size: chunk_size,
-            data: chunk_data,
+            index,
+            size,
+            data,
         }
     }
 }

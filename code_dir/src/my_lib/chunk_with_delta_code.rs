@@ -15,7 +15,7 @@ impl Chunk for ChunkWithDeltaCode<'_> {
         }
     }
     fn get_data(&self) -> Vec<u8> {
-        let mut chunk_data: Vec<u8> = self.get_data_leader_chunk();
+        let mut chunk_data = self.get_data_leader_chunk();
         for delta_action in self.get_delta_code() {
             match &delta_action.action {
                 Action::Del => {
@@ -42,16 +42,16 @@ impl Chunk for ChunkWithDeltaCode<'_> {
 
 impl ChunkWithDeltaCode<'_> {
     pub(crate) fn new(
-        chunk_index: usize,
-        chunk_size: usize,
-        link_leader_chunk: &dyn Chunk,
-        chunk_delta_code: Vec<DeltaAction>,
+        index: usize,
+        size: usize,
+        leader_chunk: &dyn Chunk,
+        delta_code: Vec<DeltaAction>,
     ) -> ChunkWithDeltaCode<'_> {
         ChunkWithDeltaCode {
-            index: chunk_index,
-            size: chunk_size,
-            leader_chunk: link_leader_chunk,
-            delta_code: chunk_delta_code,
+            index,
+            size,
+            leader_chunk,
+            delta_code,
         }
     }
 
