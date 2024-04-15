@@ -14,19 +14,19 @@ impl Chunk for ChunkWithDeltaCode<'_> {
             print!("{}", byte as char);
         }
     }
+
     fn get_data(&self) -> Vec<u8> {
         let mut chunk_data = self.get_data_leader_chunk();
         for delta_action in self.get_delta_code() {
             match &delta_action.action {
-                Action::Del => {
-                    chunk_data.remove(delta_action.index);
-                }
+                Action::Del => { chunk_data.remove(delta_action.index); }
                 Action::Add => chunk_data.insert(delta_action.index, delta_action.byte_value),
                 Action::Rep => chunk_data[delta_action.index] = delta_action.byte_value,
             }
         }
         chunk_data
     }
+
     fn get_index(&self) -> usize {
         self.index
     }

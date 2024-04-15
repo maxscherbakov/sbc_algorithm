@@ -48,11 +48,11 @@ impl Graph<'_> {
             }
         }
 
-        let mut cluster: Vec<Vec<&dyn Chunk>> = vec![Vec::new(); self.vertex_count as usize];
+        let mut clusters = vec![Vec::new(); self.vertex_count as usize];
         for (index_chunk, leader_index) in self.parent.iter().enumerate() {
-            cluster[*leader_index].push(chunks[index_chunk]);
+            clusters[*leader_index].push(chunks[index_chunk]);
         }
 
-        cluster
+        clusters
     }
 }
