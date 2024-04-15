@@ -5,9 +5,10 @@ use crate::my_lib::chunk::Chunk;
 use crate::my_lib::chunk_with_delta_code::ChunkWithDeltaCode;
 use crate::my_lib::chunk_with_full_code::ChunkWithFullCode;
 use my_lib::*;
+use fastcdc;
 
 fn main() {
-    let file = fs::File::open("test1.txt").expect("file not open");
+    let file = fs::File::open("test/test1.txt").expect("file not open");
     let buffer = BufReader::new(file);
     let mut chunks: Vec<&dyn Chunk> = Vec::new();
     let mut chunks_with_full_code: Vec<ChunkWithFullCode> = Vec::new();
