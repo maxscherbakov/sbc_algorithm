@@ -5,8 +5,15 @@ use crate::my_lib::chunk::Chunk;
 use crate::my_lib::chunk_with_delta_code::ChunkWithDeltaCode;
 use crate::my_lib::chunk_with_full_code::ChunkWithFullCode;
 use my_lib::*;
+use fastcdc;
 
 fn main() {
+    let contents = std::fs::read("test/SekienAkashita.jpg").unwrap();
+    let chunker = fastcdc::v2020::FastCDC::new(&contents, 16384, 22000, 65536);
+    for chunk in chunker {
+        println!("offset={} length={}", chunk.offset, chunk.length);
+    }
+
     let file = fs::File::open("test1.txt").expect("file not open");
     let buffer = BufReader::new(file);
     let mut chunks: Vec<&dyn Chunk> = Vec::new();
