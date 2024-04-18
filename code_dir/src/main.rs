@@ -1,41 +1,29 @@
-use std::fs;
-use std::io::{BufRead, BufReader};
 mod my_lib;
-use crate::my_lib::chunk::Chunk;
-use crate::my_lib::chunk_with_delta_code::ChunkWithDeltaCode;
-use crate::my_lib::chunk_with_full_code::ChunkWithFullCode;
+mod read_functions;
+use memmap2::Mmap;
+use my_lib::chunk::Chunk;
 use my_lib::*;
-use fastcdc;
+use std::fs::File;
 
 fn main() {
-    let contents = std::fs::read("test/SekienAkashita.jpg").unwrap();
-    let chunker = fastcdc::v2020::FastCDC::new(&contents, 16384, 22000, 65536);
-    for chunk in chunker {
-        println!("offset={} length={}", chunk.offset, chunk.length);
-    }
+    let path = "test/test1.txt";
 
-    let file = fs::File::open("test1.txt").expect("file not open");
-    let buffer = BufReader::new(file);
-    let mut chunks: Vec<&dyn Chunk> = Vec::new();
-    let mut chunks_with_full_code: Vec<ChunkWithFullCode> = Vec::new();
-    let mut chunk_index: usize = 0;
-    for line in buffer.lines() {
-        chunk_index += 1;
-        let chunk_data: Vec<u8> = line.unwrap().bytes().collect();
-        let chunk_size = chunk_data.len();
-        let chunk = ChunkWithFullCode::new(chunk_index, chunk_size, chunk_data);
-        chunks_with_full_code.push(chunk);
-    }
+    let input = File::open(path).expect("file not open");
+    let memory_map = unsafe { Mmap::map(&input).expect("Failed to create memory map") };
 
-    for chunk in &chunks_with_full_code {
-        chunks.push(chunk);
-    }
-
-    let mut chunks_with_delta_code: Vec<ChunkWithDeltaCode> = Vec::new();
-    encode(chunks.as_mut_slice(), &mut chunks_with_delta_code);
+    let mut chunks_with_full_code = Vec::new();
+    let contents = std::fs::read(path).unwrap();
+    let chunks = fastcdc::v2020::FastCDC::new(&contents, 1000, 2000, 65536);
 
     for chunk in chunks {
-        chunk.decode();
-        println!();
+        println!("offset={} length={}", chunk.offset, chunk.length);
+        chunks_with_full_code.push(Chunk::new(
+            chunk.offset,
+            chunk.length,
+            &memory_map[chunk.offset..chunk.length + chunk.offset],
+        ));
     }
+
+    encode(chunks_with_full_code.as_mut_slice(), "test_out.chunks");
+    decode::decode_file_with_chunks("test_out.chunks", "test_decode.txt")
 }
