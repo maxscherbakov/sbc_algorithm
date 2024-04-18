@@ -1,10 +1,32 @@
-pub(crate) trait Chunk {
-    fn decode(&self);
+pub(crate) struct Chunk<'a> {
+    pub(crate) offset: usize,
+    length: usize,
+    pub(crate) data: &'a [u8],
+}
 
-    fn get_data(&self) -> Vec<u8>;
-    fn get_index(&self) -> usize;
+impl Chunk<'_> {
+    pub(crate) fn new(
+        offset: usize,
+        length: usize,
+        data: &[u8],
+    ) -> Chunk {
+        Chunk {
+            offset,
+            length,
+            data,
+        }
+    }
 
-    fn get_type(&self);
+    pub(crate) fn get_data(&self) -> Vec<u8> {
+        self.data.to_vec()
+    }
 
-    fn size(&self) -> usize;
+    pub(crate) fn get_offset(&self) -> usize {
+        self.offset
+    }
+
+
+    pub(crate) fn get_length(&self) -> usize {
+        self.length
+    }
 }
