@@ -1,5 +1,4 @@
 mod my_lib;
-mod read_functions;
 use memmap2::Mmap;
 use my_lib::chunk::Chunk;
 use my_lib::*;
