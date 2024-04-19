@@ -45,12 +45,5 @@ impl Graph<'_> {
             self.parents[vertex] = self.find_set(self.parents[vertex]);
         }
         self.parents.to_vec()
-        //
-        // let mut clusters = vec![Vec::new(); self.vertex_count as usize];
-        // for (index_chunk, parent_index) in self.parents.iter().enumerate() {
-        //     clusters[*parent_index].push(index_chunk);
-        // }
-        //
-        // clusters
     }
 }

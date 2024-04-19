@@ -7,7 +7,7 @@ use chunk::Chunk;
 use graph::Graph;
 use levenshtein_functions::*;
 use std::fs::File;
-use std::io::Write;
+use std::io::{Write, Error};
 
 struct Edge {
     weight: u32,
@@ -52,25 +52,24 @@ fn find_chunk_leader_index(group: &[Chunk]) -> usize {
         .unwrap()
 }
 
-pub(super) fn write_to_file_chunk_with_full_code(chunk: &Chunk, output: &mut File) {
-    output.write_all(&0u8.to_ne_bytes()).expect("write failed");
+pub(super) fn write_to_file_chunk_with_full_code(chunk: &Chunk, output: &mut File) -> Result<(), Error> {
+    output.write_all(&0u8.to_ne_bytes())?;
     output
-        .write_all(&chunk.get_length().to_ne_bytes())
-        .expect("write failed");
-    output.write_all(&chunk.data).expect("write failed");
+        .write_all(&chunk.get_length().to_ne_bytes())?;
+    output.write_all(&chunk.data)?;
+    Ok(())
 }
 
 fn write_to_file_chunk_with_delta_code(
     offset_leader_chunk: usize,
     delta_code: Vec<DeltaAction>,
     output: &mut File,
-) {
-    output.write_all(&1u8.to_ne_bytes()).expect("write failed");
+) -> Result<(), Error>{
+    output.write_all(&1u8.to_ne_bytes())?;
     let size = delta_code.len() * 10;
-    output.write_all(&size.to_ne_bytes()).expect("write failed");
+    output.write_all(&size.to_ne_bytes())?;
     output
-        .write_all(&offset_leader_chunk.to_ne_bytes())
-        .expect("write failed");
+        .write_all(&offset_leader_chunk.to_ne_bytes())?;
 
     for action in delta_code {
         let action_id : u8;
@@ -80,19 +79,17 @@ fn write_to_file_chunk_with_delta_code(
             Action::Rep => action_id = 2,
         }
         output
-            .write_all(&action_id.to_ne_bytes())
-            .expect("write failed");
+            .write_all(&action_id.to_ne_bytes())?;
         output
-            .write_all(&action.index.to_ne_bytes())
-            .expect("write failed");
+            .write_all(&action.index.to_ne_bytes())?;
         output
-            .write_all(&action.byte_value.to_ne_bytes())
-            .expect("write failed");
+            .write_all(&action.byte_value.to_ne_bytes())?;
     }
+    Ok(())
 }
 
-pub(super) fn encode(chunks: &mut [Chunk], path: &str) {
-    let mut file = File::create(path).expect("file not create");
+pub(super) fn encode(chunks: &mut [Chunk], path: &str) -> Result<(), Error>{
+    let mut file = File::create(path)?;
     let graph_edges = create_edges(chunks);
     let mut graph = Graph::new(chunks.len(), &graph_edges);
 
@@ -109,14 +106,15 @@ pub(super) fn encode(chunks: &mut [Chunk], path: &str) {
     }
     for (chunk_index, leader_index) in leaders.iter().enumerate() {
         if *leader_index == chunk_index {
-            write_to_file_chunk_with_full_code(&chunks[chunk_index], &mut file);
+            let _ = write_to_file_chunk_with_full_code(&chunks[chunk_index], &mut file);
         } else {
             let delta_code = delta_encode(&chunks[chunk_index], &chunks[*leader_index]);
-            write_to_file_chunk_with_delta_code(
+            let _ = write_to_file_chunk_with_delta_code(
                 chunks[*leader_index].get_offset(),
                 delta_code,
                 &mut file,
             );
         }
     }
+    Ok(())
 }

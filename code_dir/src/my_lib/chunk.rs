@@ -25,7 +25,6 @@ impl Chunk<'_> {
         self.offset
     }
 
-
     pub(crate) fn get_length(&self) -> usize {
         self.length
     }

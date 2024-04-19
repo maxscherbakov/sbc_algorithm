@@ -4,11 +4,11 @@ use my_lib::chunk::Chunk;
 use my_lib::*;
 use std::fs::File;
 
-fn main() {
+fn main() -> Result<(), std::io::Error>{
     let path = "test/test1.txt";
 
-    let input = File::open(path).expect("file not open");
-    let memory_map = unsafe { Mmap::map(&input).expect("Failed to create memory map") };
+    let input = File::open(path)?;
+    let memory_map = unsafe { Mmap::map(&input)? };
 
     let mut chunks_with_full_code = Vec::new();
     let contents = std::fs::read(path).unwrap();
@@ -23,6 +23,7 @@ fn main() {
         ));
     }
 
-    encode(chunks_with_full_code.as_mut_slice(), "test_out.chunks");
-    decode::decode_file_with_chunks("test_out.chunks", "test_decode.txt")
+    let _ = encode(chunks_with_full_code.as_mut_slice(), "test_out.chunks");
+    let _ = decode::decode_file_with_chunks("test_out.chunks", "test_decode.txt");
+    Ok(())
 }
