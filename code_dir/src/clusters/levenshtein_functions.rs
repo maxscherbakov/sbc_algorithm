@@ -1,4 +1,4 @@
-use crate::my_lib::chunk::Chunk;
+use crate::clusters::chunk::Chunk;
 use std::cmp::min;
 use std::rc::Rc;
 use Action::*;
@@ -17,7 +17,7 @@ pub(crate) struct DeltaAction {
 pub(crate) fn encode(chunk_x: &Rc<dyn Chunk>, chunk_y: &Rc<dyn Chunk>) -> Vec<DeltaAction> {
     let data_chunk_x = chunk_x.get_data();
     let data_chunk_y = chunk_y.get_data();
-    let matrix = levenshtein_matrix(data_chunk_y.as_slice(), data_chunk_x.as_slice());
+    let matrix = levenshtein_matrix(data_chunk_x.as_slice(), data_chunk_y.as_slice());
     let mut delta_code_for_chunk_x: Vec<DeltaAction> = Vec::new();
     let mut x = data_chunk_x.len();
     let mut y = data_chunk_y.len();

@@ -1,5 +1,6 @@
-use crate::my_lib::chunk::Chunk;
-use crate::my_lib::levenshtein_functions::{Action, DeltaAction};
+use std::mem::size_of_val;
+use crate::clusters::chunk::Chunk;
+use crate::clusters::levenshtein_functions::{Action, DeltaAction};
 
 use std::rc::Rc;
 
@@ -26,6 +27,10 @@ impl Chunk for ChunkWithDeltaCode {
             }
         }
         chunk_data
+    }
+
+    fn size_in_memory(&self) -> u32 {
+       self.delta_code.len() as u32 * size_of_val(&self.delta_code[0]) as u32  + size_of_val(self) as u32
     }
 }
 

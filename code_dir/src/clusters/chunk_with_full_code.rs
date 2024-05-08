@@ -1,4 +1,5 @@
-use crate::my_lib::chunk::Chunk;
+use std::mem::size_of_val;
+use crate::clusters::chunk::Chunk;
 pub(crate) struct ChunkWithFullCode {
     data: Vec<u8>,
 }
@@ -11,6 +12,10 @@ impl Chunk for ChunkWithFullCode {
     }
     fn get_data(&self) -> Vec<u8> {
         self.data.clone()
+    }
+
+    fn size_in_memory(&self) -> u32 {
+        self.data.len() as u32 * size_of_val(&self.data[0]) as u32
     }
 }
 

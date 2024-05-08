@@ -6,4 +6,6 @@ pub(crate) trait Chunk {
     fn size(&self) -> usize {
         self.get_data().len()
     }
+
+    fn size_in_memory(&self) -> u32;
 }

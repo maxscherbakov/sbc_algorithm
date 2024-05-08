@@ -1,22 +1,23 @@
+#[cfg(test)]
+mod tests;
+mod hash_function;
+mod clusters;
+
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufReader, Read};
-mod my_lib;
 use crate::hash_function::hash;
-use crate::my_lib::chunk::Chunk;
-use crate::my_lib::chunk_with_full_code::ChunkWithFullCode;
-use my_lib::*;
-
-mod hash_function;
-#[cfg(test)]
-mod tests;
+use crate::clusters::chunk::Chunk;
+use crate::clusters::chunk_with_full_code::ChunkWithFullCode;
+use clusters::*;
 use std::fs::File;
-
 use std::rc::Rc;
 
 fn main() -> Result<(), std::io::Error> {
-    let path = "test/test1.txt";
+    let path = "files/test1.txt";
     let input = File::open(path)?;
+    println!("size before chunking: {}", input.metadata().unwrap().len());
+
     let mut buffer = BufReader::new(input);
     let contents = fs::read(path).unwrap();
     let chunks = fastcdc::v2020::FastCDC::new(&contents, 1000, 2000, 65536);
@@ -34,7 +35,9 @@ fn main() -> Result<(), std::io::Error> {
     }
 
     encoding(&mut chunks_hashmap);
+    let _ = decode(&chunks_hashmap, vec_with_hash_for_file);
 
+    println!("size after chunking: {}", size_hashmap(&chunks_hashmap));
     Ok(())
 }
 

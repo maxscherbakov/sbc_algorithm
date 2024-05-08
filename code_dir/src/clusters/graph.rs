@@ -1,6 +1,6 @@
-use crate::my_lib::Edge;
+use crate::clusters::Edge;
 
-pub(super) struct Graph {
+pub(crate) struct Graph {
     parent: Vec<usize>,
     rank: Vec<u32>,
 }
