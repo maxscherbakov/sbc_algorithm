@@ -1,5 +1,6 @@
 use crate::my_lib::chunk::Chunk;
 use std::cmp::min;
+use std::rc::Rc;
 use Action::*;
 
 pub(crate) enum Action {
@@ -13,7 +14,7 @@ pub(crate) struct DeltaAction {
     pub(crate) byte_value: u8,
 }
 
-pub(crate) fn coding(chunk_x: &dyn Chunk, chunk_y: &dyn Chunk) -> Vec<DeltaAction> {
+pub(crate) fn encode(chunk_x: &Rc<dyn Chunk>, chunk_y: &Rc<dyn Chunk>) -> Vec<DeltaAction> {
     let data_chunk_x = chunk_x.get_data();
     let data_chunk_y = chunk_y.get_data();
     let matrix = levenshtein_matrix(data_chunk_y.as_slice(), data_chunk_x.as_slice());
@@ -51,13 +52,14 @@ pub(crate) fn coding(chunk_x: &dyn Chunk, chunk_y: &dyn Chunk) -> Vec<DeltaActio
     delta_code_for_chunk_x
 }
 
-pub(crate) fn levenshtein_distance(chunk_x: &dyn Chunk, chunk_y: &dyn Chunk) -> u32 {
+#[allow(dead_code)]
+pub(crate) fn levenshtein_distance(chunk_x: Rc<dyn Chunk>, chunk_y: Rc<dyn Chunk>) -> u32 {
     let levenshtein_matrix =
         levenshtein_matrix(chunk_y.get_data().as_slice(), chunk_x.get_data().as_slice());
     levenshtein_matrix[chunk_y.size()][chunk_x.size()]
 }
 
-fn levenshtein_matrix(data_chunk_x: &[u8], data_chunk_y: &[u8]) -> Vec<Vec<u32>> {
+pub(crate) fn levenshtein_matrix(data_chunk_x: &[u8], data_chunk_y: &[u8]) -> Vec<Vec<u32>> {
     let mut levenshtein_matrix = vec![vec![0u32; data_chunk_x.len() + 1]; data_chunk_y.len() + 1];
     levenshtein_matrix[0] = (0..data_chunk_x.len() as u32 + 1).collect();
     for y in 1..data_chunk_y.len() + 1 {

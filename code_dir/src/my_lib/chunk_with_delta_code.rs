@@ -1,22 +1,22 @@
 use crate::my_lib::chunk::Chunk;
 use crate::my_lib::levenshtein_functions::{Action, DeltaAction};
 
-pub(crate) struct ChunkWithDeltaCode<'a> {
-    index: usize,
-    size: usize,
-    leader_chunk: &'a dyn Chunk,
+use std::rc::Rc;
+
+pub(crate) struct ChunkWithDeltaCode {
+    leader_chunk: Rc<dyn Chunk>,
     delta_code: Vec<DeltaAction>,
 }
 
-impl Chunk for ChunkWithDeltaCode<'_> {
+impl Chunk for ChunkWithDeltaCode {
     fn decode(&self) {
         for byte in self.get_data() {
             print!("{}", byte as char);
         }
     }
     fn get_data(&self) -> Vec<u8> {
-        let mut chunk_data: Vec<u8> = self.get_data_leader_chunk();
-        for delta_action in self.get_delta_code() {
+        let mut chunk_data = self.leader_chunk.get_data();
+        for delta_action in &self.delta_code {
             match &delta_action.action {
                 Action::Del => {
                     chunk_data.remove(delta_action.index);
@@ -27,39 +27,16 @@ impl Chunk for ChunkWithDeltaCode<'_> {
         }
         chunk_data
     }
-    fn get_index(&self) -> usize {
-        self.index
-    }
-
-    fn get_type(&self) {
-        println!("Chunk with delta code")
-    }
-
-    fn size(&self) -> usize {
-        self.size
-    }
 }
 
-impl ChunkWithDeltaCode<'_> {
+impl ChunkWithDeltaCode {
     pub(crate) fn new(
-        chunk_index: usize,
-        chunk_size: usize,
-        link_leader_chunk: &dyn Chunk,
+        leader_chunk: Rc<dyn Chunk>,
         chunk_delta_code: Vec<DeltaAction>,
-    ) -> ChunkWithDeltaCode<'_> {
+    ) -> ChunkWithDeltaCode {
         ChunkWithDeltaCode {
-            index: chunk_index,
-            size: chunk_size,
-            leader_chunk: link_leader_chunk,
+            leader_chunk,
             delta_code: chunk_delta_code,
         }
-    }
-
-    pub(crate) fn get_data_leader_chunk(&self) -> Vec<u8> {
-        self.leader_chunk.get_data()
-    }
-
-    pub(crate) fn get_delta_code(&self) -> &[DeltaAction] {
-        self.delta_code.as_slice()
     }
 }

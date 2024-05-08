@@ -1,20 +1,15 @@
-use crate::my_lib::chunk::Chunk;
 use crate::my_lib::Edge;
 
-pub(super) struct Graph<'a> {
-    count_vertices: u32,
+pub(super) struct Graph {
     parent: Vec<usize>,
     rank: Vec<u32>,
-    edges: &'a [Edge],
 }
 
-impl Graph<'_> {
-    pub(crate) fn new(graph_count_vertices: usize, graph_edges: &[Edge]) -> Graph {
+impl Graph {
+    pub(crate) fn new(graph_count_vertices: usize) -> Graph {
         Graph {
-            count_vertices: graph_count_vertices as u32,
             parent: (0..graph_count_vertices).collect(),
             rank: vec![0u32; graph_count_vertices],
-            edges: graph_edges,
         }
     }
 
@@ -36,23 +31,21 @@ impl Graph<'_> {
         index_set
     }
 
-    pub(super) fn create_clusters_based_on_the_kraskal_algorithm<'a>(
+    pub(super) fn create_clusters_based_on_the_kraskal_algorithm(
         &mut self,
-        chunks: &[&'a dyn Chunk],
-    ) -> Vec<Vec<&'a dyn Chunk>> {
-        for edge in self.edges {
+        edges: Vec<Edge>,
+    ) -> Vec<usize> {
+        for edge in edges {
             let index_set_1 = self.find_set(edge.chunk_index_1);
             let index_set_2 = self.find_set(edge.chunk_index_2);
             if index_set_1 != index_set_2 {
                 self.union_set(index_set_1, index_set_2);
             }
         }
-
-        let mut cluster: Vec<Vec<&dyn Chunk>> = vec![Vec::new(); self.count_vertices as usize];
-        for (index_chunk, leader_index) in self.parent.iter().enumerate() {
-            cluster[*leader_index].push(chunks[index_chunk]);
+        for i in self.parent.clone() {
+            self.find_set(i);
         }
 
-        cluster
+        self.parent.clone()
     }
 }
