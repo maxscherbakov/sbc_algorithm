@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::fs::File;
 use std::io::{Write, Error};
+use crate::clusters::levenshtein_functions::levenshtein_distance;
 
 
 struct Edge {
@@ -20,7 +21,7 @@ struct Edge {
     chunk_index_2: usize,
 }
 
-fn create_edges(chunks_vec: Vec<(&u32, &Rc<dyn Chunk>)>) -> Vec<Edge> {
+fn create_edges(chunks_vec: &Vec<(&u32, &Rc<dyn Chunk>)>) -> Vec<Edge> {
     let mut graph_edges: Vec<Edge> = Vec::new();
 
     let count_chunks = chunks_vec.len();
@@ -42,6 +43,28 @@ fn create_edges(chunks_vec: Vec<(&u32, &Rc<dyn Chunk>)>) -> Vec<Edge> {
     graph_edges
 }
 
+fn find_leader_chunk_in_cluster(chunks_vec : &Vec<(&u32, &Rc<dyn Chunk>)>, cluster : &Vec<usize>) -> usize{
+    let mut leader_index = 0;
+    let mut min_sum_dist = std::u32::MAX;
+
+    for chunk_index_1 in cluster.iter() {
+        let mut sum_dist_for_chunk = 0u32;
+
+        for chunk_index_2 in cluster.iter() {
+            sum_dist_for_chunk += levenshtein_distance(Rc::clone(chunks_vec[*chunk_index_1].1), Rc::clone(chunks_vec[*chunk_index_2].1))
+        }
+
+        if sum_dist_for_chunk < min_sum_dist {
+            leader_index = *chunk_index_1;
+            min_sum_dist = sum_dist_for_chunk
+        }
+    }
+    return leader_index;
+
+}
+
+
+
 pub(super) fn encoding(chunks_hashmap: &mut HashMap<u32, Rc<dyn Chunk>>) {
     let mut chunk_hash_leader_hash = Vec::new();
     {
@@ -49,11 +72,21 @@ pub(super) fn encoding(chunks_hashmap: &mut HashMap<u32, Rc<dyn Chunk>>) {
         chunks_vec.sort_by(|a, b| a.0.cmp(b.0));
 
         let mut graph = Graph::new(chunks_hashmap.len());
-        let graph_edges = create_edges(chunks_vec.clone());
+        let graph_edges = create_edges(&chunks_vec);
         let clusters = graph.create_clusters_based_on_the_kraskal_algorithm(graph_edges);
 
+        let mut clusters_vec = vec![Vec::new(); chunks_vec.len()];
         for (chunk_index, leader_index) in clusters.iter().enumerate() {
-            chunk_hash_leader_hash.push((*chunks_vec[chunk_index].0, *chunks_vec[*leader_index].0))
+            clusters_vec[*leader_index].push(chunk_index);
+        }
+
+        for cluster in clusters_vec {
+            if cluster.is_empty() { continue }
+            let leader_index = find_leader_chunk_in_cluster(&chunks_vec, &cluster);
+
+            for chunk_index in &cluster {
+                chunk_hash_leader_hash.push((*chunks_vec[*chunk_index].0, *chunks_vec[leader_index].0))
+            }
         }
     }
 

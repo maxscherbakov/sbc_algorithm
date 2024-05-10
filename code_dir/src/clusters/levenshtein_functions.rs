@@ -55,7 +55,7 @@ pub(crate) fn encode(chunk_x: &Rc<dyn Chunk>, chunk_y: &Rc<dyn Chunk>) -> Vec<De
 #[allow(dead_code)]
 pub(crate) fn levenshtein_distance(chunk_x: Rc<dyn Chunk>, chunk_y: Rc<dyn Chunk>) -> u32 {
     let levenshtein_matrix =
-        levenshtein_matrix(chunk_y.get_data().as_slice(), chunk_x.get_data().as_slice());
+        levenshtein_matrix(chunk_x.get_data().as_slice(), chunk_y.get_data().as_slice());
     levenshtein_matrix[chunk_y.size()][chunk_x.size()]
 }
 
