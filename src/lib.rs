@@ -83,8 +83,8 @@ impl SBCMap {
 
                 self.sbc_hashmap.insert(*hash, Chunk::Delta {
                     hash : vertex.parent,
-                    delta_code : levenshtein_functions::encode(chunk_data_parent.as_slice(),
-                                                               chunk_data.as_slice())
+                    delta_code : levenshtein_functions::encode(chunk_data.as_slice(),
+                                                               chunk_data_parent.as_slice())
                 });
             }
         }
