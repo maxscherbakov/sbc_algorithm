@@ -1,0 +1,9 @@
+[package]
+name = "runner"
+version = "0.1.0"
+edition = "2021"
+
+
+[dependencies]
+sbc_algorithm = { path = "../." }
+fastcdc = "3.1.0"
