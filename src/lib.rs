@@ -23,14 +23,14 @@ pub trait Map {
     fn insert(&mut self, chunk : Vec<u8>, cdc_hash : u64);
 }
 
-pub enum Chunk {
+enum Chunk {
     Simple {data : Vec<u8>},
     Delta {hash : u32, delta_code : Vec<DeltaAction>}
 }
 
 pub struct SBCMap {
     hashmap_transitions : HashMap<u64, u32>,
-    pub sbc_hashmap: HashMap<u32, Chunk>,
+    sbc_hashmap: HashMap<u32, Chunk>,
     graph: Graph,
 }
 
@@ -119,5 +119,65 @@ impl Map for SBCMap {
                                                           data.as_slice())
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::fs::File;
+    use std::io::{BufReader, Read};
+    use fastcdc::v2016::FastCDC;
+    use crate::{Chunk, SBCMap};
+    fn create_cdc_vec(input : File, chunks : FastCDC) -> Vec<(u64, Vec<u8>)>{
+        let mut cdc_vec = Vec::new();
+        let mut buffer = BufReader::new(input);
+
+        for chunk in chunks {
+            let length = chunk.length;
+            let mut bytes = vec![0; length];
+            buffer.read_exact(&mut bytes).expect("buffer crash");
+            cdc_vec.push((chunk.hash, bytes));
+        }
+        cdc_vec
+    }
+
+    fn crate_sbc_map(path : &str) -> SBCMap {
+        let contents = fs::read(path).unwrap();
+        let chunks = FastCDC::new(&contents, 1000, 2000, 65536);
+        let input = File::open(path).expect("File not open");
+
+        let cdc_vec = create_cdc_vec(input, chunks);
+        let mut sbc_map = SBCMap::new(cdc_vec);
+        sbc_map.encode();
+        sbc_map
+    }
+
+    #[test]
+    fn checking_for_simple_chunks() {
+        let path = "runner/files/test1.txt";
+        let sbc_map = crate_sbc_map(path);
+        let mut count_simple_chunk = 0;
+        for (_sbc_hash, chunk) in sbc_map.sbc_hashmap {
+            match chunk {
+                Chunk::Simple { .. } => {count_simple_chunk += 1}
+                Chunk::Delta { .. } => {}
+            }
+        }
+        assert!(count_simple_chunk > 0)
+    }
+
+    #[test]
+    fn checking_for_delta_chunks() {
+        let path = "runner/files/test1.txt";
+        let sbc_map = crate_sbc_map(path);
+        let mut count_delta_chunk = 0;
+        for (_sbc_hash, chunk) in sbc_map.sbc_hashmap {
+            match chunk {
+                Chunk::Simple { .. } => {}
+                Chunk::Delta { .. } => {count_delta_chunk += 1}
+            }
+        }
+        assert!(count_delta_chunk > 0)
     }
 }
