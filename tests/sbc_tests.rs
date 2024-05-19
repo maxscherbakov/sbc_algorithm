@@ -64,7 +64,7 @@ fn test_data_recovery() -> Result<(), std::io::Error> {
 fn checking_for_simple_chunks() {
     let sbc_map = crate_sbc_map(PATH);
     let mut count_simple_chunk = 0;
-    for (sbc_hash, chunk) in sbc_map.sbc_hashmap {
+    for (_sbc_hash, chunk) in sbc_map.sbc_hashmap {
         match chunk {
             Chunk::Simple { .. } => {count_simple_chunk += 1}
             Chunk::Delta { .. } => {}
@@ -78,7 +78,7 @@ fn checking_for_delta_chunks() {
     let path = "runner/files/test1.txt";
     let sbc_map = crate_sbc_map(path);
     let mut count_delta_chunk = 0;
-    for (sbc_hash, chunk) in sbc_map.sbc_hashmap {
+    for (_sbc_hash, chunk) in sbc_map.sbc_hashmap {
         match chunk {
             Chunk::Simple { .. } => {}
             Chunk::Delta { .. } => {count_delta_chunk += 1}
