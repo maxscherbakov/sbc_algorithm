@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use crate::levenshtein_functions::levenshtein_distance;
 use crate::{Chunk, match_chunk};
-const MAX_WEIGHT_EDGE : u32 = 1 << 10;
+const MAX_WEIGHT_EDGE : u32 = 1 << 8;
 
 
 pub struct Vertex {
@@ -93,7 +93,7 @@ impl Graph {
     pub(crate) fn add_vertex(&mut self, hash : u32) {
         let mut edge = Edge { weight : u32::MAX, hash_chunk_1 : hash, hash_chunk_2 : 0 };
 
-        for other_hash in std::cmp::max(hash-MAX_WEIGHT_EDGE, u32::MIN)..std::cmp::min(hash+MAX_WEIGHT_EDGE, u32::MAX) {
+        for other_hash in hash-std::cmp::min(MAX_WEIGHT_EDGE, hash)..=hash+std::cmp::min(MAX_WEIGHT_EDGE, u32::MAX-hash) {
             if self.vertices.contains_key(&other_hash) {
                 let leader_for_other_chunk = self.vertices.get(&other_hash).unwrap().parent;
                 let dist = (leader_for_other_chunk as i64 - hash as i64).abs() as u32;
