@@ -1,14 +1,12 @@
-use std::collections::HashMap;
 use crate::levenshtein_functions::levenshtein_distance;
-use crate::{Chunk, match_chunk};
-const MAX_WEIGHT_EDGE : u32 = 1 << 8;
-
+use crate::{match_chunk, Chunk};
+use std::collections::HashMap;
+const MAX_WEIGHT_EDGE: u32 = 1 << 8;
 
 pub struct Vertex {
-    pub(crate) parent : u32,
-    rank : u32,
+    pub(crate) parent: u32,
+    rank: u32,
 }
-
 
 pub(self) struct Edge {
     weight: u32,
@@ -16,15 +14,13 @@ pub(self) struct Edge {
     hash_chunk_2: u32,
 }
 
-
 pub struct Graph {
     pub(crate) vertices: HashMap<u32, Vertex>,
 }
 
-fn find_leader_chunk_in_cluster(chunks_hashmap: &HashMap<u32, Chunk>, cluster : &Vec<u32>) -> u32 {
+fn find_leader_chunk_in_cluster(chunks_hashmap: &HashMap<u32, Chunk>, cluster: &Vec<u32>) -> u32 {
     let mut leader_hash = 0;
     let mut min_sum_dist = u32::MAX;
-
 
     for chunk_hash_1 in cluster.iter() {
         let mut sum_dist_for_chunk = 0u32;
@@ -34,8 +30,8 @@ fn find_leader_chunk_in_cluster(chunks_hashmap: &HashMap<u32, Chunk>, cluster : 
         for chunk_hash_2 in cluster.iter() {
             let chunk_data_2 = match_chunk(chunks_hashmap, chunk_hash_2);
 
-            sum_dist_for_chunk += levenshtein_distance(chunk_data_1.as_slice(),
-                                                       chunk_data_2.as_slice());
+            sum_dist_for_chunk +=
+                levenshtein_distance(chunk_data_1.as_slice(), chunk_data_2.as_slice());
         }
 
         if sum_dist_for_chunk < min_sum_dist {
@@ -44,16 +40,15 @@ fn find_leader_chunk_in_cluster(chunks_hashmap: &HashMap<u32, Chunk>, cluster : 
         }
     }
     return leader_hash;
-
 }
-
 
 fn create_edges(chunks_hashmap: &HashMap<u32, Chunk>) -> Vec<Edge> {
     let mut graph_edges: Vec<Edge> = Vec::new();
 
-
     for hash_1 in chunks_hashmap.keys() {
-        for hash_2 in hash_1-std::cmp::min(*hash_1, MAX_WEIGHT_EDGE)..=hash_1+std::cmp::min(u32::MAX - *hash_1, MAX_WEIGHT_EDGE) {
+        for hash_2 in hash_1 - std::cmp::min(*hash_1, MAX_WEIGHT_EDGE)
+            ..=hash_1 + std::cmp::min(u32::MAX - *hash_1, MAX_WEIGHT_EDGE)
+        {
             if !chunks_hashmap.contains_key(&hash_2) {
                 continue;
             }
@@ -71,14 +66,18 @@ fn create_edges(chunks_hashmap: &HashMap<u32, Chunk>) -> Vec<Edge> {
     graph_edges
 }
 
-
-
 impl Graph {
     pub(crate) fn new(chunks_hashmap: &HashMap<u32, Chunk>) -> Graph {
         let mut vertices = HashMap::new();
 
         for chunk_hash in chunks_hashmap.keys() {
-            vertices.insert(*chunk_hash, Vertex { parent : *chunk_hash, rank : 1 });
+            vertices.insert(
+                *chunk_hash,
+                Vertex {
+                    parent: *chunk_hash,
+                    rank: 1,
+                },
+            );
         }
 
         let mut graph = Graph { vertices };
@@ -90,10 +89,16 @@ impl Graph {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn add_vertex(&mut self, hash : u32) {
-        let mut edge = Edge { weight : u32::MAX, hash_chunk_1 : hash, hash_chunk_2 : 0 };
+    pub(crate) fn add_vertex(&mut self, hash: u32) {
+        let mut edge = Edge {
+            weight: u32::MAX,
+            hash_chunk_1: hash,
+            hash_chunk_2: 0,
+        };
 
-        for other_hash in hash-std::cmp::min(MAX_WEIGHT_EDGE, hash)..=hash+std::cmp::min(MAX_WEIGHT_EDGE, u32::MAX-hash) {
+        for other_hash in hash - std::cmp::min(MAX_WEIGHT_EDGE, hash)
+            ..=hash + std::cmp::min(MAX_WEIGHT_EDGE, u32::MAX - hash)
+        {
             if self.vertices.contains_key(&other_hash) {
                 let leader_for_other_chunk = self.vertices.get(&other_hash).unwrap().parent;
                 let dist = (leader_for_other_chunk as i64 - hash as i64).abs() as u32;
@@ -105,9 +110,21 @@ impl Graph {
         }
 
         if edge.weight <= MAX_WEIGHT_EDGE {
-            self.vertices.insert(hash, Vertex { parent : edge.hash_chunk_2, rank : 1});
+            self.vertices.insert(
+                hash,
+                Vertex {
+                    parent: edge.hash_chunk_2,
+                    rank: 1,
+                },
+            );
         } else {
-            self.vertices.insert(hash, Vertex { parent : hash, rank : 1 });
+            self.vertices.insert(
+                hash,
+                Vertex {
+                    parent: hash,
+                    rank: 1,
+                },
+            );
         }
     }
 
@@ -119,11 +136,35 @@ impl Graph {
         let hash_2 = *hash_vertex_2.0;
 
         if hash_vertex_1.1.rank < hash_vertex_2.1.rank {
-            self.vertices.insert(hash_2, Vertex { parent : hash_2, rank }) ;
-            self.vertices.insert(hash_1, Vertex { parent : hash_2, rank }) ;
+            self.vertices.insert(
+                hash_2,
+                Vertex {
+                    parent: hash_2,
+                    rank,
+                },
+            );
+            self.vertices.insert(
+                hash_1,
+                Vertex {
+                    parent: hash_2,
+                    rank,
+                },
+            );
         } else {
-            self.vertices.insert(hash_1, Vertex { parent : hash_1, rank }) ;
-            self.vertices.insert(hash_2, Vertex { parent : hash_1, rank }) ;
+            self.vertices.insert(
+                hash_1,
+                Vertex {
+                    parent: hash_1,
+                    rank,
+                },
+            );
+            self.vertices.insert(
+                hash_2,
+                Vertex {
+                    parent: hash_1,
+                    rank,
+                },
+            );
         }
     }
 
@@ -153,7 +194,9 @@ impl Graph {
         let mut clusters = HashMap::new();
 
         let mut vector_keys = Vec::new();
-        for key in self.vertices.keys() { vector_keys.push(*key); }
+        for key in self.vertices.keys() {
+            vector_keys.push(*key);
+        }
 
         for hash in vector_keys {
             let leader = self.find_set(hash);
@@ -162,7 +205,9 @@ impl Graph {
         }
 
         for cluster in clusters.values() {
-            if cluster.is_empty() { continue }
+            if cluster.is_empty() {
+                continue;
+            }
 
             let leader_hash = find_leader_chunk_in_cluster(chunks_hashmap, cluster);
 

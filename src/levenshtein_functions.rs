@@ -12,15 +12,14 @@ pub(crate) struct DeltaAction {
     pub(crate) byte_value: u8,
 }
 
-
-
 pub(crate) fn encode(data_chunk: &[u8], data_chunk_parent: &[u8]) -> Vec<DeltaAction> {
     let matrix = levenshtein_matrix(data_chunk, data_chunk_parent);
     let mut delta_code: Vec<DeltaAction> = Vec::new();
     let mut x = data_chunk.len();
     let mut y = data_chunk_parent.len();
     while x > 0 && y > 0 {
-        if (data_chunk_parent[y - 1] != data_chunk[x - 1]) && (matrix[y - 1][x - 1] < matrix[y][x]) {
+        if (data_chunk_parent[y - 1] != data_chunk[x - 1]) && (matrix[y - 1][x - 1] < matrix[y][x])
+        {
             delta_code.push(DeltaAction {
                 action: Rep,
                 index: y - 1,
@@ -51,13 +50,13 @@ pub(crate) fn encode(data_chunk: &[u8], data_chunk_parent: &[u8]) -> Vec<DeltaAc
 }
 
 pub(crate) fn levenshtein_distance(data_chunk: &[u8], data_chunk_parent: &[u8]) -> u32 {
-    let levenshtein_matrix =
-        levenshtein_matrix(data_chunk, data_chunk_parent);
+    let levenshtein_matrix = levenshtein_matrix(data_chunk, data_chunk_parent);
     levenshtein_matrix[data_chunk_parent.len()][data_chunk.len()]
 }
 
 pub(crate) fn levenshtein_matrix(data_chunk: &[u8], data_chunk_parent: &[u8]) -> Vec<Vec<u32>> {
-    let mut levenshtein_matrix = vec![vec![0u32; data_chunk.len() + 1]; data_chunk_parent.len() + 1];
+    let mut levenshtein_matrix =
+        vec![vec![0u32; data_chunk.len() + 1]; data_chunk_parent.len() + 1];
     levenshtein_matrix[0] = (0..data_chunk.len() as u32 + 1).collect();
     for y in 1..data_chunk_parent.len() + 1 {
         levenshtein_matrix[y][0] = y as u32;

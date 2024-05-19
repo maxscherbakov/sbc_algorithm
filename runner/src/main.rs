@@ -1,8 +1,8 @@
 extern crate sbc_algorithm;
+use sbc_algorithm::SBCMap;
 use std::fs;
 use std::fs::File;
 use std::io::{BufReader, Read};
-use sbc_algorithm::SBCMap;
 
 pub fn main() -> Result<(), std::io::Error> {
     let path = "files/test1.txt";

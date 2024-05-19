@@ -1,11 +1,9 @@
+use fastcdc::v2016::FastCDC;
+use sbc_algorithm::{Map, SBCMap};
 use std::fs;
 use std::fs::File;
 use std::io::{BufReader, Read};
-use fastcdc::v2016::FastCDC;
-use sbc_algorithm::{Map, SBCMap};
-const PATH : &str = "runner/files/test1.txt";
-
-
+const PATH: &str = "runner/files/test1.txt";
 
 #[test]
 fn test_data_recovery() -> Result<(), std::io::Error> {
