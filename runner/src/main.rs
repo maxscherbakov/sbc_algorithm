@@ -14,16 +14,16 @@ pub fn main() -> Result<(), std::io::Error> {
     let chunks = fastcdc::v2020::FastCDC::new(&contents, 1000, 2000, 65536);
     let mut cdc_vec = Vec::new();
 
-
+    let mut index = 0;
     for chunk in chunks {
+        index += 1;
         let length = chunk.length;
         let mut bytes = vec![0; length];
         buffer.read_exact(&mut bytes)?;
-        cdc_vec.push((chunk.hash, bytes));
-
+        cdc_vec.push((index, bytes));
     }
 
-    let mut sbc_map = SBCMap::new(cdc_vec);
+    let mut sbc_map = SBCMap::new(cdc_vec.clone());
     sbc_map.encode();
 
     Ok(())
