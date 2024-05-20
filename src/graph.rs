@@ -8,7 +8,7 @@ pub struct Vertex {
     rank: u32,
 }
 
-pub(self) struct Edge {
+struct Edge {
     weight: u32,
     hash_chunk_1: u32,
     hash_chunk_2: u32,
@@ -18,7 +18,7 @@ pub struct Graph {
     pub(crate) vertices: HashMap<u32, Vertex>,
 }
 
-fn find_leader_chunk_in_cluster(chunks_hashmap: &HashMap<u32, Chunk>, cluster: &Vec<u32>) -> u32 {
+fn find_leader_chunk_in_cluster(chunks_hashmap: &HashMap<u32, Chunk>, cluster: &[u32]) -> u32 {
     let mut leader_hash = 0;
     let mut min_sum_dist = u32::MAX;
 
@@ -39,7 +39,7 @@ fn find_leader_chunk_in_cluster(chunks_hashmap: &HashMap<u32, Chunk>, cluster: &
             min_sum_dist = sum_dist_for_chunk
         }
     }
-    return leader_hash;
+    leader_hash
 }
 
 fn create_edges(chunks_hashmap: &HashMap<u32, Chunk>) -> Vec<Edge> {
@@ -81,7 +81,7 @@ impl Graph {
         }
 
         let mut graph = Graph { vertices };
-        let edges = create_edges(&chunks_hashmap);
+        let edges = create_edges(chunks_hashmap);
         graph.create_graph_based_on_the_kraskal_algorithm(edges);
 
         graph.find_leaders_in_clusters(chunks_hashmap);
@@ -101,7 +101,7 @@ impl Graph {
         {
             if self.vertices.contains_key(&other_hash) {
                 let leader_for_other_chunk = self.vertices.get(&other_hash).unwrap().parent;
-                let dist = (leader_for_other_chunk as i64 - hash as i64).abs() as u32;
+                let dist = (leader_for_other_chunk as i64 - hash as i64).unsigned_abs() as u32;
                 if dist < edge.weight {
                     edge.weight = dist;
                     edge.hash_chunk_2 = leader_for_other_chunk;
@@ -209,7 +209,7 @@ impl Graph {
                 continue;
             }
 
-            let leader_hash = find_leader_chunk_in_cluster(chunks_hashmap, cluster);
+            let leader_hash = find_leader_chunk_in_cluster(chunks_hashmap, cluster.as_slice());
 
             for chunk_index in cluster {
                 self.vertices.get_mut(chunk_index).unwrap().parent = leader_hash;

@@ -1,20 +1,21 @@
 use graph::Graph;
 use levenshtein_functions::{Action, DeltaAction};
 use std::collections::HashMap;
+use std::mem::size_of_val;
 
 mod graph;
 mod hash_function;
 pub mod levenshtein_functions;
 
-fn size_hashmap(hash_map: &HashMap<u32, Chunk>) -> u32 {
+fn size_hashmap(hash_map: &HashMap<u32, Chunk>) -> usize {
     let mut size = 0;
     for i in hash_map {
         match i.1 {
-            Chunk::Simple { data } => size += data.len() as u32,
+            Chunk::Simple { data } => size += data.len(),
             Chunk::Delta {
-                hash: _,
+                parent_hash: hash,
                 delta_code,
-            } => size += 4 + delta_code.len() as u32 * 10,
+            } => size += size_of_val(hash) + delta_code.len() * size_of_val(&delta_code[0]),
         }
     }
     size
@@ -30,7 +31,7 @@ enum Chunk {
         data: Vec<u8>,
     },
     Delta {
-        hash: u32,
+        parent_hash: u32,
         delta_code: Vec<DeltaAction>,
     },
 }
@@ -45,17 +46,19 @@ fn match_chunk(sbc_hashmap: &HashMap<u32, Chunk>, hash: &u32) -> Vec<u8> {
     let chunk = sbc_hashmap.get(hash).unwrap();
     match chunk {
         Chunk::Simple { data } => data.clone(),
-        Chunk::Delta { hash, delta_code } => {
+        Chunk::Delta {
+            parent_hash: hash,
+            delta_code,
+        } => {
             let mut chunk_data = match_chunk(sbc_hashmap, hash);
             for delta_action in delta_code {
-                match &delta_action.action {
+                let (action, index, byte_value) = delta_action.get();
+                match action {
                     Action::Del => {
-                        chunk_data.remove(delta_action.index);
+                        chunk_data.remove(index);
                     }
-                    Action::Add => {
-                        chunk_data.insert(delta_action.index + 1, delta_action.byte_value)
-                    }
-                    Action::Rep => chunk_data[delta_action.index] = delta_action.byte_value,
+                    Action::Add => chunk_data.insert(index + 1, byte_value),
+                    Action::Rep => chunk_data[index] = byte_value,
                 }
             }
             chunk_data
@@ -92,7 +95,7 @@ impl SBCMap {
                 self.sbc_hashmap.insert(
                     *hash,
                     Chunk::Delta {
-                        hash: vertex.parent,
+                        parent_hash: vertex.parent,
                         delta_code: levenshtein_functions::encode(
                             chunk_data.as_slice(),
                             chunk_data_parent.as_slice(),
@@ -127,7 +130,7 @@ impl Map for SBCMap {
             self.sbc_hashmap.insert(
                 sbc_hash,
                 Chunk::Delta {
-                    hash: hash_leader,
+                    parent_hash: hash_leader,
                     delta_code: levenshtein_functions::encode(
                         chunk_data_1.as_slice(),
                         data.as_slice(),
