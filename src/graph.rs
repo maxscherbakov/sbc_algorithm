@@ -18,7 +18,7 @@ pub struct Graph {
     pub(crate) vertices: HashMap<u32, Vertex>,
 }
 
-fn find_leader_chunk_in_cluster(chunks_hashmap: &HashMap<u32, Chunk>, cluster: &[u32]) -> u32 {
+pub fn find_leader_chunk_in_cluster(chunks_hashmap: &HashMap<u32, Chunk>, cluster: &[u32]) -> u32 {
     let mut leader_hash = 0;
     let mut min_sum_dist = u32::MAX;
 
@@ -84,7 +84,7 @@ impl Graph {
         let edges = create_edges(chunks_hashmap);
         graph.create_graph_based_on_the_kraskal_algorithm(edges);
 
-        graph.find_leaders_in_clusters(chunks_hashmap);
+        graph.set_leaders_in_clusters(chunks_hashmap);
         graph
     }
 
@@ -190,7 +190,8 @@ impl Graph {
         }
     }
 
-    pub fn find_leaders_in_clusters(&mut self, chunks_hashmap: &HashMap<u32, Chunk>) {
+    // change leader to parent?
+    pub fn set_leaders_in_clusters(&mut self, chunks_hashmap: &HashMap<u32, Chunk>) {
         let mut clusters = HashMap::new();
 
         let mut vector_keys = Vec::new();
