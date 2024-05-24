@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use chunkfs::{ChunkHash, map};
 use chunkfs::map::{Database};
 use chunkfs::scrub::{Scrub, ScrubMeasurements};
+use chunkfs::storage::DataContainer;
 use crate::{Chunk, hash_function, levenshtein_functions, match_chunk, SBCMap};
 use std::io;
 use std::io::ErrorKind;
@@ -9,8 +10,13 @@ use crate::graph::{find_leader_chunk_in_cluster, Graph, Vertex};
 
 pub struct SBCScrubber;
 
-impl<Hash: ChunkHash, CDC> Scrub<Hash, u32, CDC> for SBCScrubber {
-    fn scrub<'a>(&mut self, cdc_map: <&'a mut CDC as IntoIterator>::IntoIter, sbc_map: &mut Box<dyn Database<Hash, Chunk>>) -> ScrubMeasurements where Hash: 'a{
+
+impl<Hash: ChunkHash, K, B> Scrub<Hash, K, B> for SBCScrubber
+    where
+        B: Database<Hash, DataContainer<K>>,
+        for<'a> &'a mut B: IntoIterator<Item = (&'a Hash, &'a mut DataContainer<K>)>,
+{
+    fn scrub<'a>(&mut self, cdc_map: <&'a mut B as IntoIterator>::IntoIter, sbc_map: &mut Box<dyn Database<Hash, Chunk>>) -> ScrubMeasurements where Hash: 'a{
         let mut hashmap_transitions = HashMap::new();
         let mut chunks_hashmap = HashMap::new();
 
@@ -33,7 +39,7 @@ impl<Hash: ChunkHash, CDC> Scrub<Hash, u32, CDC> for SBCScrubber {
 
 
 
-impl<Hash: ChunkHash> Database<Hash, Chunk> for SBCMap<Hash> {
+impl<Hash: ChunkHash> Database<Hash, Vec<u8>> for SBCMap<Hash> {
     fn insert(&mut self, cdc_hash: Hash, data: Vec<u8>) -> io::Result<()> {
         let sbc_hash = crate::hash_function::hash(data.as_slice());
 
@@ -61,10 +67,9 @@ impl<Hash: ChunkHash> Database<Hash, Chunk> for SBCMap<Hash> {
         Ok(())
     }
 
-    fn get(&self, cdc_hash: &Hash) -> io::Result<Chunk> {
+    fn get(&self, cdc_hash: &Hash) -> io::Result<Vec<u8>> {
         let sbc_hash = self.hashmap_transitions.get(&cdc_hash).unwrap();
-        self.sbc_hashmap.get(&sbc_hash).unwrap().ok_or(ErrorKind::NotFound.into())
-        //match_chunk(&self.sbc_hashmap, sbc_hash)
+        match_chunk(&self.sbc_hashmap, sbc_hash).ok_or(ErrorKind::NotFound.into())
     }
 
     fn remove(&mut self, cdc_hash: &Hash) {
