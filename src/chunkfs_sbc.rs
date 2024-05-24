@@ -1,15 +1,32 @@
+use std::collections::HashMap;
 use chunkfs::{ChunkHash, map};
 use chunkfs::map::{Database};
 use chunkfs::scrub::{Scrub, ScrubMeasurements};
-use crate::{Chunk, levenshtein_functions, match_chunk, SBCMap};
+use crate::{Chunk, hash_function, levenshtein_functions, match_chunk, SBCMap};
 use std::io;
 use std::io::ErrorKind;
-use crate::graph::{find_leader_chunk_in_cluster, Vertex};
+use crate::graph::{find_leader_chunk_in_cluster, Graph, Vertex};
 
 pub struct SBCScrubber;
 
 impl<Hash: ChunkHash, CDC> Scrub<Hash, u32, CDC> for SBCScrubber {
-    fn scrub<'a>(&mut self, cdc_map: <&'a mut CDC as IntoIterator>::IntoIter, target_map: &mut Box<dyn Database<u32, Vec<u8>>>) -> ScrubMeasurements where Hash: 'a{
+    fn scrub<'a>(&mut self, cdc_map: <&'a mut CDC as IntoIterator>::IntoIter, sbc_map: &mut Box<dyn Database<Hash, Chunk>>) -> ScrubMeasurements where Hash: 'a{
+        let mut hashmap_transitions = HashMap::new();
+        let mut chunks_hashmap = HashMap::new();
+
+        for (cdc_hash, chunk) in cdc_map {
+            let sbc_hash = hash_function::hash(chunk.as_slice());
+            hashmap_transitions.insert(cdc_hash, sbc_hash);
+            chunks_hashmap.insert(sbc_hash, Chunk::Simple { data: chunk });
+        }
+
+        let graph = Graph::new(&chunks_hashmap);
+
+        *sbc_map = Box::new(SBCMap {
+            hashmap_transitions,
+            sbc_hashmap: chunks_hashmap,
+            graph,
+        });
         todo!()
     }
 }
