@@ -1,9 +1,7 @@
-use chunkfs::{Scrub, ScrubMeasurements, DataContainer, Database, ChunkHash};
+use chunkfs::{Scrub, ScrubMeasurements, DataContainer, Database, ChunkHash, Data};
 use crate::{Chunk, hash_function, levenshtein_functions, match_chunk, SBCMap};
 use std::io;
 use crate::graph::{find_leader_chunk_in_cluster, Graph};
-
-
 
 
 impl<Hash: ChunkHash> Database<Hash, Vec<u8>> for SBCMap<Hash> {
@@ -47,29 +45,32 @@ impl<Hash: ChunkHash> Database<Hash, Vec<u8>> for SBCMap<Hash> {
         if *sbc_hash == parent_hash {
             let mut cluster = Vec::new();
             for (hash, vertex) in &self.graph.vertices {
-                if vertex.parent == parent_hash && *hash != parent_hash {
+                if vertex.parent == parent_hash && *hash != *sbc_hash {
                     cluster.push(*hash);
                 }
             }
-            let new_parent = find_leader_chunk_in_cluster(&self.sbc_hashmap, cluster.as_slice());
-            let new_parent_data = match_chunk(&self.sbc_hashmap, &new_parent);
-            self.sbc_hashmap.insert(new_parent, Chunk::Simple { data : new_parent_data.clone()});
+            if !cluster.is_empty() {
+                let new_parent = find_leader_chunk_in_cluster(&self.sbc_hashmap, cluster.as_slice());
+                let new_parent_data = match_chunk(&self.sbc_hashmap, &new_parent);
+                self.sbc_hashmap.insert(new_parent, Chunk::Simple { data : new_parent_data.clone()});
 
-            for hash in cluster {
-                let chunk_data = match_chunk(&self.sbc_hashmap, &hash);
-                self.sbc_hashmap.insert(
-                    hash,
-                    Chunk::Delta {
-                        parent_hash: new_parent,
-                        delta_code: levenshtein_functions::encode(
-                            chunk_data.as_slice(),
-                            new_parent_data.as_slice(),
-                        ),
-                    },
-                );
+                for hash in cluster {
+                    if hash == new_parent { continue; }
+                    let chunk_data = match_chunk(&self.sbc_hashmap, &hash);
+                    self.sbc_hashmap.insert(
+                        hash,
+                        Chunk::Delta {
+                            parent_hash: new_parent,
+                            delta_code: levenshtein_functions::encode(
+                                chunk_data.as_slice(),
+                                new_parent_data.as_slice(),
+                            ),
+                        },
+                    );
 
-                let vertex = self.graph.vertices.get_mut(&hash).unwrap();
-                vertex.parent = new_parent;
+                    let vertex = self.graph.vertices.get_mut(&hash).unwrap();
+                    vertex.parent = new_parent;
+                }
             }
         }
 
@@ -89,8 +90,8 @@ impl<Hash: ChunkHash> Database<Hash, Vec<u8>> for SBCMap<Hash> {
         self.encode();
         Ok(())
     }
-
 }
+
 
 pub struct SBCScrubber;
 

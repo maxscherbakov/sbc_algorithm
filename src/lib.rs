@@ -4,9 +4,11 @@ use std::collections::HashMap;
 use std::mem::size_of_val;
 use chunkfs::{ChunkHash};
 
+
 mod graph;
 mod hash_function;
 mod levenshtein_functions;
+mod chunkfs_sbc;
 
 pub fn hashmap_size<Hash : ChunkHash> (sbc_map: &SBCMap<Hash>) -> usize {
     let mut size = 0;
@@ -113,7 +115,7 @@ impl<Hash : ChunkHash> SBCMap<Hash> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Chunk, ChunkHash, SBCMap};
+    use crate::{Chunk, SBCMap};
     use fastcdc::v2016::FastCDC;
     use std::fs;
     use std::fs::File;
@@ -126,12 +128,12 @@ mod tests {
             let length = chunk.length;
             let mut bytes = vec![0; length];
             buffer.read_exact(&mut bytes).expect("buffer crash");
-            cdc_vec.push((chunk.hash, bytes));
+            cdc_vec.push((chunk.hash.clone(), bytes));
         }
         cdc_vec
     }
 
-    fn crate_sbc_map<Hash : ChunkHash>(path: &str) -> SBCMap<Hash> {
+    fn crate_sbc_map(path: &str) -> SBCMap<u64> {
         let contents = fs::read(path).unwrap();
         let chunks = FastCDC::new(&contents, 1000, 2000, 65536);
         let input = File::open(path).expect("File not open");
