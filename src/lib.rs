@@ -1,16 +1,15 @@
 use graph::Graph;
+pub use hash_function::hash;
 use levenshtein_functions::{Action, DeltaAction};
 use std::collections::HashMap;
 use std::mem::size_of_val;
-use chunkfs::{ChunkHash};
 
-
+mod chunkfs_sbc;
 mod graph;
 mod hash_function;
 mod levenshtein_functions;
-mod chunkfs_sbc;
 
-pub fn hashmap_size<Hash : ChunkHash> (sbc_map: &SBCMap<Hash>) -> usize {
+pub fn hashmap_size(sbc_map: &SBCMap) -> usize {
     let mut size = 0;
     for (_, chunk) in sbc_map.sbc_hashmap.iter() {
         match chunk {
@@ -59,28 +58,22 @@ pub fn match_chunk(sbc_hashmap: &HashMap<u32, Chunk>, hash: &u32) -> Vec<u8> {
 }
 
 #[allow(dead_code)]
-pub struct SBCMap<Hash : ChunkHash> {
-    hashmap_transitions: HashMap<Hash, u32>,
+pub struct SBCMap {
     sbc_hashmap: HashMap<u32, Chunk>,
     graph: Graph,
 }
 
-
-impl<Hash : ChunkHash> SBCMap<Hash> {
-    pub fn new(cdc_map: Vec<(Hash, Vec<u8>)>) -> SBCMap<Hash> {
-        let mut hashmap_transitions = HashMap::new();
+impl SBCMap {
+    pub fn new(sbc_vec: Vec<(u32, Vec<u8>)>) -> SBCMap {
         let mut chunks_hashmap = HashMap::new();
 
-        for (cdc_hash, chunk) in cdc_map {
-            let sbc_hash = hash_function::hash(chunk.as_slice());
-            hashmap_transitions.insert(cdc_hash, sbc_hash);
+        for (sbc_hash, chunk) in sbc_vec {
             chunks_hashmap.insert(sbc_hash, Chunk::Simple { data: chunk });
         }
 
         let graph = Graph::new(&chunks_hashmap);
 
         SBCMap {
-            hashmap_transitions,
             sbc_hashmap: chunks_hashmap,
             graph,
         }
@@ -91,7 +84,12 @@ impl<Hash : ChunkHash> SBCMap<Hash> {
             match self.sbc_hashmap.get(&vertex.parent).unwrap() {
                 Chunk::Simple { .. } => {}
                 Chunk::Delta { .. } => {
-                    self.sbc_hashmap.insert(vertex.parent, Chunk::Simple{data : match_chunk(&self.sbc_hashmap, &vertex.parent)});
+                    self.sbc_hashmap.insert(
+                        vertex.parent,
+                        Chunk::Simple {
+                            data: match_chunk(&self.sbc_hashmap, &vertex.parent),
+                        },
+                    );
                 }
             }
             if *hash != vertex.parent {
@@ -115,31 +113,35 @@ impl<Hash : ChunkHash> SBCMap<Hash> {
 
 #[cfg(test)]
 mod tests {
+    use crate::hash_function::hash;
     use crate::{Chunk, SBCMap};
     use fastcdc::v2016::FastCDC;
     use std::fs;
     use std::fs::File;
     use std::io::{BufReader, Read};
-    fn create_cdc_vec(input: File, chunks: FastCDC) -> Vec<(u64, Vec<u8>)> {
-        let mut cdc_vec = Vec::new();
+
+    fn create_sbc_vec(input: File, chunks: FastCDC) -> Vec<(u32, Vec<u8>)> {
+        let mut sbc_vec = Vec::new();
         let mut buffer = BufReader::new(input);
 
         for chunk in chunks {
             let length = chunk.length;
             let mut bytes = vec![0; length];
             buffer.read_exact(&mut bytes).expect("buffer crash");
-            cdc_vec.push((chunk.hash.clone(), bytes));
+
+            let sbc_hash = hash(bytes.as_slice());
+            sbc_vec.push((sbc_hash, bytes));
         }
-        cdc_vec
+        sbc_vec
     }
 
-    fn crate_sbc_map(path: &str) -> SBCMap<u64> {
+    fn crate_sbc_map(path: &str) -> SBCMap {
         let contents = fs::read(path).unwrap();
         let chunks = FastCDC::new(&contents, 1000, 2000, 65536);
         let input = File::open(path).expect("File not open");
 
-        let cdc_vec = create_cdc_vec(input, chunks);
-        let mut sbc_map = SBCMap::new(cdc_vec);
+        let sbc_vec = create_sbc_vec(input, chunks);
+        let mut sbc_map = SBCMap::new(sbc_vec);
         sbc_map.encode();
         sbc_map
     }

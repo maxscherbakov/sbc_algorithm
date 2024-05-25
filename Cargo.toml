@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-chunkfs = { path = "../chunkfs" } # change to " git = "
+chunkfs = { git = "https://github.com/Piletskii-Oleg/chunkfs.git", branch = "SBC-FBC-support" }
 
 [dev-dependencies]
 fastcdc = "3.1.0"
