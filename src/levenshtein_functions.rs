@@ -6,7 +6,7 @@ pub(crate) enum Action {
     Add,
     Rep,
 }
-pub(crate) struct DeltaAction {
+pub struct DeltaAction {
     code: u32,
 }
 
@@ -30,7 +30,7 @@ impl DeltaAction {
         DeltaAction { code }
     }
 
-    pub fn get(&self) -> (Action, usize, u8) {
+    pub(crate) fn get(&self) -> (Action, usize, u8) {
         let action = match self.code / (1 << 30) {
             0 => Rep,
             1 => Add,

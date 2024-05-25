@@ -26,7 +26,6 @@ fn hashmap_size(hash_map: &HashMap<u32, Chunk>) -> usize {
 
 pub trait Map<Hash : ChunkHash> {
     fn get(&self, hash: Hash) -> Vec<u8>;
-    fn insert(&mut self, chunk: Vec<u8>, cdc_hash: Hash);
 }
 
 pub enum Chunk {
@@ -115,32 +114,6 @@ impl<Hash : ChunkHash> Map<Hash> for SBCMap<Hash> {
     fn get(&self, cdc_hash: Hash) -> Vec<u8> {
         let sbc_hash = self.hashmap_transitions.get(&cdc_hash).unwrap();
         match_chunk(&self.sbc_hashmap, sbc_hash)
-    }
-
-    fn insert(&mut self, data: Vec<u8>, cdc_hash: Hash) {
-        let sbc_hash = hash_function::hash(data.as_slice());
-
-        self.hashmap_transitions.insert(cdc_hash, sbc_hash);
-        self.graph.add_vertex(sbc_hash);
-
-        let hash_leader = self.graph.vertices.get(&sbc_hash).unwrap().parent;
-
-        if hash_leader == sbc_hash {
-            self.sbc_hashmap.insert(sbc_hash, Chunk::Simple { data });
-        } else {
-            let chunk_data_1 = match_chunk(&self.sbc_hashmap, &hash_leader);
-
-            self.sbc_hashmap.insert(
-                sbc_hash,
-                Chunk::Delta {
-                    parent_hash: hash_leader,
-                    delta_code: levenshtein_functions::encode(
-                        chunk_data_1.as_slice(),
-                        data.as_slice(),
-                    ),
-                },
-            );
-        }
     }
 }
 
