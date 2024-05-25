@@ -7,12 +7,10 @@ use chunkfs::{ChunkHash};
 mod graph;
 mod hash_function;
 mod levenshtein_functions;
-mod chunkfs_sbc;
 
-
-fn hashmap_size(hash_map: &HashMap<u32, Chunk>) -> usize {
+pub fn hashmap_size<Hash : ChunkHash> (sbc_map: &SBCMap<Hash>) -> usize {
     let mut size = 0;
-    for (_, chunk) in hash_map {
+    for (_, chunk) in sbc_map.sbc_hashmap.iter() {
         match chunk {
             Chunk::Simple { data } => size += data.len(),
             Chunk::Delta {
@@ -24,10 +22,6 @@ fn hashmap_size(hash_map: &HashMap<u32, Chunk>) -> usize {
     size
 }
 
-pub trait Map<Hash : ChunkHash> {
-    fn get(&self, hash: Hash) -> Vec<u8>;
-}
-
 pub enum Chunk {
     Simple {
         data: Vec<u8>,
@@ -36,12 +30,6 @@ pub enum Chunk {
         parent_hash: u32,
         delta_code: Vec<DeltaAction>,
     },
-}
-
-pub struct SBCMap<Hash : ChunkHash> {
-    hashmap_transitions: HashMap<Hash, u32>,
-    sbc_hashmap: HashMap<u32, Chunk>,
-    graph: Graph,
 }
 
 pub fn match_chunk(sbc_hashmap: &HashMap<u32, Chunk>, hash: &u32) -> Vec<u8> {
@@ -68,6 +56,14 @@ pub fn match_chunk(sbc_hashmap: &HashMap<u32, Chunk>, hash: &u32) -> Vec<u8> {
     }
 }
 
+#[allow(dead_code)]
+pub struct SBCMap<Hash : ChunkHash> {
+    hashmap_transitions: HashMap<Hash, u32>,
+    sbc_hashmap: HashMap<u32, Chunk>,
+    graph: Graph,
+}
+
+
 impl<Hash : ChunkHash> SBCMap<Hash> {
     pub fn new(cdc_map: Vec<(Hash, Vec<u8>)>) -> SBCMap<Hash> {
         let mut hashmap_transitions = HashMap::new();
@@ -90,6 +86,12 @@ impl<Hash : ChunkHash> SBCMap<Hash> {
 
     pub fn encode(&mut self) {
         for (hash, vertex) in &self.graph.vertices {
+            match self.sbc_hashmap.get(&vertex.parent).unwrap() {
+                Chunk::Simple { .. } => {}
+                Chunk::Delta { .. } => {
+                    self.sbc_hashmap.insert(vertex.parent, Chunk::Simple{data : match_chunk(&self.sbc_hashmap, &vertex.parent)});
+                }
+            }
             if *hash != vertex.parent {
                 let chunk_data_parent = match_chunk(&self.sbc_hashmap, &vertex.parent);
                 let chunk_data = match_chunk(&self.sbc_hashmap, hash);
@@ -106,14 +108,6 @@ impl<Hash : ChunkHash> SBCMap<Hash> {
                 );
             }
         }
-        println!("size after chunking: {}", hashmap_size(&self.sbc_hashmap));
-    }
-}
-
-impl<Hash : ChunkHash> Map<Hash> for SBCMap<Hash> {
-    fn get(&self, cdc_hash: Hash) -> Vec<u8> {
-        let sbc_hash = self.hashmap_transitions.get(&cdc_hash).unwrap();
-        match_chunk(&self.sbc_hashmap, sbc_hash)
     }
 }
 

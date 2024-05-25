@@ -1,8 +1,4 @@
-use std::collections::HashMap;
-use chunkfs::{ChunkHash};
-use chunkfs::map::{Database};
-use chunkfs::scrub::{Scrub, ScrubMeasurements};
-use chunkfs::storage::DataContainer;
+use chunkfs::{Scrub, ScrubMeasurements, DataContainer, Database, ChunkHash};
 use crate::{Chunk, hash_function, levenshtein_functions, match_chunk, SBCMap};
 use std::io;
 use crate::graph::{find_leader_chunk_in_cluster, Graph};
@@ -12,6 +8,7 @@ use crate::graph::{find_leader_chunk_in_cluster, Graph};
 
 impl<Hash: ChunkHash> Database<Hash, Vec<u8>> for SBCMap<Hash> {
     fn insert(&mut self, cdc_hash: Hash, data: Vec<u8>) -> io::Result<()> {
+
         let sbc_hash = hash_function::hash(data.as_slice());
 
         self.hashmap_transitions.insert(cdc_hash, sbc_hash);
@@ -80,6 +77,19 @@ impl<Hash: ChunkHash> Database<Hash, Vec<u8>> for SBCMap<Hash> {
         self.sbc_hashmap.remove(sbc_hash);
         self.hashmap_transitions.remove(cdc_hash);
     }
+
+    fn insert_multi(&mut self, keys: Vec<Hash>, values: Vec<Vec<u8>>) -> io::Result<()> {
+        for chunk_index in 0..keys.len() {
+            let sbc_hash = hash_function::hash(values[chunk_index].as_slice());
+            self.hashmap_transitions.insert(keys[chunk_index].clone(), sbc_hash);
+            self.sbc_hashmap.insert(sbc_hash, Chunk::Simple { data: values[chunk_index].clone() });
+        }
+
+        self.graph = Graph::new(&self.sbc_hashmap);
+        self.encode();
+        Ok(())
+    }
+
 }
 
 pub struct SBCScrubber;
@@ -96,26 +106,20 @@ impl<Hash: ChunkHash, B> Scrub<Hash, Hash, B> for SBCScrubber
     ) -> ScrubMeasurements
         where
             Hash: 'a,
-            Hash: 'a,
     {
-        let mut hashmap_transitions = HashMap::new();
-        let mut chunks_hashmap = HashMap::new();
+        let mut keys = Vec::new();
+        let mut values = Vec::new();
 
-        for (cdc_hash, _chunk) in cdc_map {
-            let chunk = Vec::new();
-            let sbc_hash = hash_function::hash(chunk.as_slice());
-            hashmap_transitions.insert(cdc_hash.clone(), sbc_hash);
-            chunks_hashmap.insert(sbc_hash, Chunk::Simple { data: chunk });
+        for (cdc_hash, chunk) in cdc_map {
+            keys.push(cdc_hash.clone());
+            let chunk = chunk.extract();
+            match chunk {
+                Data::Chunk(data) => { values.push(data.clone()); }
+                Data::TargetChunk(_) => { values.push(Vec::new()); }
+            }
         }
 
-        let graph = Graph::new(&chunks_hashmap);
-
-
-        sbc_map = Box::new(SBCMap {
-            hashmap_transitions,
-            sbc_hashmap: chunks_hashmap,
-            graph,
-        });
+        let _ = sbc_map.insert_multi(keys, values);
 
         ScrubMeasurements::default()
     }
