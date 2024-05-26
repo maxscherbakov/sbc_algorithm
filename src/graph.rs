@@ -1,11 +1,18 @@
 use crate::levenshtein_functions::levenshtein_distance;
-use crate::{match_chunk, Chunk};
+use crate::SBCChunk;
 use std::collections::HashMap;
+use chunkfs::Database;
+
 const MAX_WEIGHT_EDGE: u32 = 1 << 8;
 
 pub struct Vertex {
     pub(crate) parent: u32,
     rank: u32,
+}
+impl Vertex {
+    pub fn new(key : u32) -> Vertex {
+        Vertex { parent : key, rank : 1 }
+    }
 }
 
 struct Edge {
@@ -14,119 +21,18 @@ struct Edge {
     hash_chunk_2: u32,
 }
 
+
 pub struct Graph {
     pub(crate) vertices: HashMap<u32, Vertex>,
 }
 
-pub fn find_leader_chunk_in_cluster(chunks_hashmap: &HashMap<u32, Chunk>, cluster: &[u32]) -> u32 {
-    let mut leader_hash = 0;
-    let mut min_sum_dist = u32::MAX;
-
-    for chunk_hash_1 in cluster.iter() {
-        let mut sum_dist_for_chunk = 0u32;
-
-        let chunk_data_1 = match_chunk(chunks_hashmap, chunk_hash_1);
-
-        for chunk_hash_2 in cluster.iter() {
-            let chunk_data_2 = match_chunk(chunks_hashmap, chunk_hash_2);
-
-            sum_dist_for_chunk +=
-                levenshtein_distance(chunk_data_1.as_slice(), chunk_data_2.as_slice());
-        }
-
-        if sum_dist_for_chunk < min_sum_dist {
-            leader_hash = *chunk_hash_1;
-            min_sum_dist = sum_dist_for_chunk
-        }
-    }
-    leader_hash
-}
-
-fn create_edges(chunks_hashmap: &HashMap<u32, Chunk>) -> Vec<Edge> {
-    let mut graph_edges: Vec<Edge> = Vec::new();
-
-    for hash_1 in chunks_hashmap.keys() {
-        for hash_2 in hash_1 - std::cmp::min(*hash_1, MAX_WEIGHT_EDGE)
-            ..=hash_1 + std::cmp::min(u32::MAX - *hash_1, MAX_WEIGHT_EDGE)
-        {
-            if !chunks_hashmap.contains_key(&hash_2) {
-                continue;
-            }
-            let dist = std::cmp::max(hash_2, *hash_1) - std::cmp::min(hash_2, *hash_1);
-
-            graph_edges.push(Edge {
-                weight: dist,
-                hash_chunk_1: *hash_1,
-                hash_chunk_2: hash_2,
-            })
-        }
-    }
-
-    graph_edges.sort_by(|a, b| a.weight.cmp(&b.weight));
-    graph_edges
-}
-
 impl Graph {
-    pub(crate) fn new(chunks_hashmap: &HashMap<u32, Chunk>) -> Graph {
-        let mut vertices = HashMap::new();
-
-        for chunk_hash in chunks_hashmap.keys() {
-            vertices.insert(
-                *chunk_hash,
-                Vertex {
-                    parent: *chunk_hash,
-                    rank: 1,
-                },
-            );
-        }
-
-        let mut graph = Graph { vertices };
-        let edges = create_edges(chunks_hashmap);
-        graph.create_graph_based_on_the_kraskal_algorithm(edges);
-
-        graph.set_leaders_in_clusters(chunks_hashmap);
-        graph
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn add_vertex(&mut self, hash: u32) {
-        let mut edge = Edge {
-            weight: u32::MAX,
-            hash_chunk_1: hash,
-            hash_chunk_2: 0,
-        };
-
-        for other_hash in hash - std::cmp::min(MAX_WEIGHT_EDGE, hash)
-            ..=hash + std::cmp::min(MAX_WEIGHT_EDGE, u32::MAX - hash)
-        {
-            if self.vertices.contains_key(&other_hash) {
-                let leader_for_other_chunk = self.vertices.get(&other_hash).unwrap().parent;
-                let dist = (leader_for_other_chunk as i64 - hash as i64).unsigned_abs() as u32;
-                if dist < edge.weight {
-                    edge.weight = dist;
-                    edge.hash_chunk_2 = leader_for_other_chunk;
-                }
-            }
-        }
-
-        if edge.weight <= MAX_WEIGHT_EDGE {
-            self.vertices.insert(
-                hash,
-                Vertex {
-                    parent: edge.hash_chunk_2,
-                    rank: 1,
-                },
-            );
-        } else {
-            self.vertices.insert(
-                hash,
-                Vertex {
-                    parent: hash,
-                    rank: 1,
-                },
-            );
+    pub(crate) fn new() -> Graph {
+        Graph {
+            vertices : HashMap::new(),
         }
     }
+
 
     fn union_set(&mut self, hash_set_1: u32, hash_set_2: u32) {
         let hash_vertex_1 = self.vertices.get_key_value(&hash_set_1).unwrap();
@@ -168,7 +74,7 @@ impl Graph {
         }
     }
 
-    fn find_set(&mut self, hash_set: u32) -> u32 {
+    pub fn find_set(&mut self, hash_set: u32) -> u32 {
         let parent = self.vertices.get(&hash_set).unwrap().parent;
         let rank = self.vertices.get(&hash_set).unwrap().rank;
 
@@ -180,7 +86,9 @@ impl Graph {
         hash_set
     }
 
-    fn create_graph_based_on_the_kraskal_algorithm(&mut self, edges: Vec<Edge>) {
+    pub fn update_graph_based_on_the_kraskal_algorithm(&mut self, pairs : Vec<(u32, Vec<u8>)>) -> HashMap<u32, Vec<u32>>{
+        self.add_vertices(pairs.as_slice());
+        let edges = self.create_edges(pairs.as_slice());
         for edge in edges {
             let hash_set_1 = self.find_set(edge.hash_chunk_1);
             let hash_set_2 = self.find_set(edge.hash_chunk_2);
@@ -188,33 +96,86 @@ impl Graph {
                 self.union_set(hash_set_1, hash_set_2);
             }
         }
-    }
 
-    // change leader to parent?
-    pub fn set_leaders_in_clusters(&mut self, chunks_hashmap: &HashMap<u32, Chunk>) {
         let mut clusters = HashMap::new();
-
-        let mut vector_keys = Vec::new();
-        for key in self.vertices.keys() {
-            vector_keys.push(*key);
+        for (hash, _) in pairs  {
+            let leader = self.find_set(*hash);
+            clusters.entry(leader).or_insert(Vec::new());
         }
-
-        for hash in vector_keys {
-            let leader = self.find_set(hash);
-            let cluster = clusters.entry(leader).or_insert(Vec::new());
-            cluster.push(hash);
-        }
-
-        for cluster in clusters.values() {
-            if cluster.is_empty() {
-                continue;
+        for hash in self.vertices.keys() {
+            let leader = self.find_set(*hash);
+            if self.vertices.contains_key(&leader) {
+                clusters.get_mut(&leader).unwrap().push(*hash);
             }
+        }
+        clusters
+    }
 
-            let leader_hash = find_leader_chunk_in_cluster(chunks_hashmap, cluster.as_slice());
 
-            for chunk_index in cluster {
-                self.vertices.get_mut(chunk_index).unwrap().parent = leader_hash;
+    fn add_vertices(&mut self, pairs : &[(u32, Vec<u8>)]) {
+        for (key, _) in pairs {
+            self.vertices.insert(*key, Vertex::new(*key));
+        }
+    }
+
+    fn create_edges(&mut self, pairs : &[(u32, Vec<u8>)]) -> Vec<Edge>{
+        let mut edges = Vec::new();
+        for (hash_1, _) in pairs  {
+            let mut min_dist = u32::MAX;
+            let mut hash_2 = 0;
+            for other_hash in *hash_1 - std::cmp::min(*hash_1, MAX_WEIGHT_EDGE)
+                ..=*hash_1 + std::cmp::min(u32::MAX - *hash_1, MAX_WEIGHT_EDGE)
+            {
+                if !self.vertices.contains_key(&hash_2) {
+                    continue;
+                }
+                let dist = std::cmp::max(hash_2, *hash_1) - std::cmp::min(hash_2, *hash_1);
+                if dist < min_dist {
+                    min_dist = dist;
+                    hash_2 = other_hash;
+                }
+
+            }
+            edges.push(Edge {
+                weight: min_dist,
+                hash_chunk_1: *hash_1,
+                hash_chunk_2: hash_2,
+            })
+        }
+        edges
+    }
+
+
+    pub fn set_leaders_in_clusters(&mut self, target_map: &mut Box<dyn Database<u32, SBCChunk>>, clusters : &HashMap<u32, Vec<u32>>) {
+        for (parent_hash_past, cluster) in clusters {
+            let parent_hash = find_parent_hash_in_cluster(target_map, cluster.as_slice());
+            self.vertices.get_mut(&parent_hash).unwrap().rank = self.vertices.get(parent_hash_past).unwrap().rank;
+            for hash in cluster.iter() {
+                self.vertices.get_mut(hash).unwrap().parent = parent_hash
             }
         }
     }
+
+}
+fn find_parent_hash_in_cluster(target_map: &Box<dyn Database<u32, SBCChunk>>, cluster: &[u32]) -> u32 {
+    let mut leader_hash = 0;
+    let mut min_sum_dist = u32::MAX;
+
+    for chunk_hash_1 in cluster.iter() {
+        let mut sum_dist_for_chunk = 0u32;
+        let chunk_data_1 = crate::chunkfs_sbc::get_data_chunk(target_map.get(chunk_hash_1).unwrap(), target_map);
+
+        for chunk_hash_2 in cluster.iter() {
+            let chunk_data_2 = crate::chunkfs_sbc::get_data_chunk(target_map.get(chunk_hash_2).unwrap(), target_map);
+
+            sum_dist_for_chunk +=
+                levenshtein_distance(chunk_data_1.as_slice(), chunk_data_2.as_slice());
+        }
+
+        if sum_dist_for_chunk < min_sum_dist {
+            leader_hash = *chunk_hash_1;
+            min_sum_dist = sum_dist_for_chunk
+        }
+    }
+    leader_hash
 }

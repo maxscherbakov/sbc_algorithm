@@ -13,8 +13,8 @@ pub fn hashmap_size(sbc_map: &SBCMap) -> usize {
     let mut size = 0;
     for (_, chunk) in sbc_map.sbc_hashmap.iter() {
         match chunk {
-            Chunk::Simple { data } => size += data.len(),
-            Chunk::Delta {
+            SBCChunk::Simple { data } => size += data.len(),
+            SBCChunk::Delta {
                 parent_hash: hash,
                 delta_code,
             } => size += size_of_val(hash) + delta_code.len() * size_of_val(&delta_code[0]),
@@ -23,7 +23,7 @@ pub fn hashmap_size(sbc_map: &SBCMap) -> usize {
     size
 }
 
-pub enum Chunk {
+pub enum SBCChunk {
     Simple {
         data: Vec<u8>,
     },
@@ -33,80 +33,15 @@ pub enum Chunk {
     },
 }
 
-pub fn match_chunk(sbc_hashmap: &HashMap<u32, Chunk>, hash: &u32) -> Vec<u8> {
-    let chunk = sbc_hashmap.get(hash).unwrap();
-    match chunk {
-        Chunk::Simple { data } => data.clone(),
-        Chunk::Delta {
-            parent_hash: hash,
-            delta_code,
-        } => {
-            let mut chunk_data = match_chunk(sbc_hashmap, hash);
-            for delta_action in delta_code {
-                let (action, index, byte_value) = delta_action.get();
-                match action {
-                    Action::Del => {
-                        chunk_data.remove(index);
-                    }
-                    Action::Add => chunk_data.insert(index + 1, byte_value),
-                    Action::Rep => chunk_data[index] = byte_value,
-                }
-            }
-            chunk_data
-        }
-    }
-}
-
 #[allow(dead_code)]
 pub struct SBCMap {
-    sbc_hashmap: HashMap<u32, Chunk>,
-    graph: Graph,
+    sbc_hashmap: HashMap<u32, SBCChunk>,
 }
 
 impl SBCMap {
     pub fn new(sbc_vec: Vec<(u32, Vec<u8>)>) -> SBCMap {
-        let mut chunks_hashmap = HashMap::new();
-
-        for (sbc_hash, chunk) in sbc_vec {
-            chunks_hashmap.insert(sbc_hash, Chunk::Simple { data: chunk });
-        }
-
-        let graph = Graph::new(&chunks_hashmap);
-
         SBCMap {
-            sbc_hashmap: chunks_hashmap,
-            graph,
-        }
-    }
-
-    pub fn encode(&mut self) {
-        for (hash, vertex) in &self.graph.vertices {
-            match self.sbc_hashmap.get(&vertex.parent).unwrap() {
-                Chunk::Simple { .. } => {}
-                Chunk::Delta { .. } => {
-                    self.sbc_hashmap.insert(
-                        vertex.parent,
-                        Chunk::Simple {
-                            data: match_chunk(&self.sbc_hashmap, &vertex.parent),
-                        },
-                    );
-                }
-            }
-            if *hash != vertex.parent {
-                let chunk_data_parent = match_chunk(&self.sbc_hashmap, &vertex.parent);
-                let chunk_data = match_chunk(&self.sbc_hashmap, hash);
-
-                self.sbc_hashmap.insert(
-                    *hash,
-                    Chunk::Delta {
-                        parent_hash: vertex.parent,
-                        delta_code: levenshtein_functions::encode(
-                            chunk_data.as_slice(),
-                            chunk_data_parent.as_slice(),
-                        ),
-                    },
-                );
-            }
+            sbc_hashmap: HashMap::new(),
         }
     }
 }
@@ -114,7 +49,7 @@ impl SBCMap {
 #[cfg(test)]
 mod tests {
     use crate::hash_function::hash;
-    use crate::{Chunk, SBCMap};
+    use crate::{SBCChunk, SBCMap};
     use fastcdc::v2016::FastCDC;
     use std::fs;
     use std::fs::File;
@@ -153,8 +88,8 @@ mod tests {
         let mut count_simple_chunk = 0;
         for (_sbc_hash, chunk) in sbc_map.sbc_hashmap {
             match chunk {
-                Chunk::Simple { .. } => count_simple_chunk += 1,
-                Chunk::Delta { .. } => {}
+                SBCChunk::Simple { .. } => count_simple_chunk += 1,
+                SBCChunk::Delta { .. } => {}
             }
         }
         assert!(count_simple_chunk > 0)
@@ -167,8 +102,8 @@ mod tests {
         let mut count_delta_chunk = 0;
         for (_sbc_hash, chunk) in sbc_map.sbc_hashmap {
             match chunk {
-                Chunk::Simple { .. } => {}
-                Chunk::Delta { .. } => count_delta_chunk += 1,
+                SBCChunk::Simple { .. } => {}
+                SBCChunk::Delta { .. } => count_delta_chunk += 1,
             }
         }
         assert!(count_delta_chunk > 0)
