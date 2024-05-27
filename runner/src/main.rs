@@ -1,5 +1,5 @@
 extern crate sbc_algorithm;
-use sbc_algorithm::{hash, hashmap_size, SBCMap};
+use sbc_algorithm::{hash, SBCMap};
 use std::fs;
 use std::fs::File;
 use std::io::{BufReader, Read};
@@ -22,9 +22,7 @@ pub fn main() -> Result<(), std::io::Error> {
         cdc_vec.push((hash(bytes.as_slice()), bytes));
     }
 
-    let mut sbc_map = SBCMap::new(cdc_vec.clone());
-    sbc_map.encode();
-    println!("size after chunking: {}", hashmap_size(&sbc_map));
+    let _sbc_map = SBCMap::new();
 
     Ok(())
 }
