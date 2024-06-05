@@ -6,59 +6,23 @@ pub(crate) enum Action {
     Add,
     Rep,
 }
-pub struct DeltaAction {
-    code: u32,
-}
 
-impl DeltaAction {
-    fn new(action: Action, index: usize, byte_value: u8) -> DeltaAction {
-        let mut code = 0u32;
-        match action {
-            Del => {
-                code += 1 << 31;
-            }
-            Add => {
-                code += 1 << 30;
-            }
-            Rep => {}
-        }
-        code += byte_value as u32 * (1 << 22);
-        if index >= (1 << 22) {
-            panic!()
-        }
-        code += index as u32;
-        DeltaAction { code }
-    }
-
-    pub(crate) fn get(&self) -> (Action, usize, u8) {
-        let action = match self.code / (1 << 30) {
-            0 => Rep,
-            1 => Add,
-            2 => Del,
-            _ => panic!(),
-        };
-        let byte_value = self.code % (1 << 30) / (1 << 22);
-        let index = self.code % (1 << 22);
-        (action, index as usize, byte_value as u8)
-    }
-}
-
-pub(crate) fn encode(data_chunk: &[u8], data_chunk_parent: &[u8]) -> Vec<DeltaAction> {
+pub(crate) fn encode(data_chunk: &[u8], data_chunk_parent: &[u8]) -> Vec<u32> {
     let matrix = levenshtein_matrix(data_chunk, data_chunk_parent);
-    let mut delta_code: Vec<DeltaAction> = Vec::new();
+    let mut delta_code= Vec::new();
     let mut x = data_chunk.len();
     let mut y = data_chunk_parent.len();
     while x > 0 && y > 0 {
         if (data_chunk_parent[y - 1] != data_chunk[x - 1]) && (matrix[y - 1][x - 1] < matrix[y][x])
         {
-            delta_code.push(DeltaAction::new(Rep, y - 1, data_chunk[x - 1]));
+            delta_code.push(encode_delta_action(Rep, y - 1, data_chunk[x - 1]));
             x -= 1;
             y -= 1;
         } else if matrix[y - 1][x] < matrix[y][x] {
-            delta_code.push(DeltaAction::new(Del, y - 1, 0));
+            delta_code.push(encode_delta_action(Del, y - 1, 0));
             y -= 1;
         } else if matrix[y][x - 1] < matrix[y][x] {
-            delta_code.push(DeltaAction::new(Add, y - 1, data_chunk[x - 1]));
+            delta_code.push(encode_delta_action(Add, y - 1, data_chunk[x - 1]));
             x -= 1;
         } else {
             x -= 1;
@@ -90,4 +54,23 @@ pub(crate) fn levenshtein_matrix(data_chunk: &[u8], data_chunk_parent: &[u8]) ->
         }
     }
     levenshtein_matrix
+}
+
+fn encode_delta_action(action: Action, index: usize, byte_value: u8) -> u32 {
+    let mut code = 0u32;
+    match action {
+        Del => {
+            code += 1 << 31;
+        }
+        Add => {
+            code += 1 << 30;
+        }
+        Rep => {}
+    }
+    code += byte_value as u32 * (1 << 22);
+    if index >= (1 << 22) {
+        panic!()
+    }
+    code += index as u32;
+    code
 }

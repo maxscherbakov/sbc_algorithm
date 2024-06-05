@@ -1,184 +1,182 @@
-use crate::graph::Graph;
-use crate::levenshtein_functions::{levenshtein_distance, Action, DeltaAction};
-use crate::{hash_function, levenshtein_functions, SBCMap};
-use chunkfs::{ChunkHash, Data, DataContainer, Database, Scrub, ScrubMeasurements};
 use std::collections::HashMap;
+use crate::graph::{Graph};
+use crate::{ChunkType, hash_function, levenshtein_functions, SBCMap};
+use chunkfs::{ChunkHash, Data, DataContainer, Database, Scrub, ScrubMeasurements};
 use std::io;
+use crate::levenshtein_functions::{Action};
+use crate::levenshtein_functions::Action::{Add, Del, Rep};
+use crate::{SBCHash};
+use std::time::{Instant};
 
-impl Database<u32, Vec<u8>> for SBCMap {
-    fn insert(&mut self, sbc_hash: u32, data: Vec<u8>) -> io::Result<()> {
-        self.sbc_hashmap.insert(sbc_hash, data);
+impl Database<SBCHash, Vec<u8>> for SBCMap {
+    fn insert(&mut self, sbc_hash: SBCHash, chunk: Vec<u8>) -> io::Result<()> {
+        self.sbc_hashmap.insert(sbc_hash, chunk);
         Ok(())
     }
 
-    fn get(&self, sbc_hash: &u32) -> io::Result<&Vec<u8>> {
-        Ok(self.sbc_hashmap.get(sbc_hash).unwrap())
+    fn get(&self, sbc_hash: &SBCHash) -> io::Result<Vec<u8>> {
+        let sbc_value = self.sbc_hashmap.get(sbc_hash).unwrap();
+
+        let chunk = match sbc_hash.chunk_type {
+            ChunkType::Simple { } => { sbc_value.clone() }
+            ChunkType::Delta { } => {
+                let mut buf = [0u8; 4];
+                buf.copy_from_slice(&sbc_value[..4]);
+
+                let parent_hash = u32::from_be_bytes(buf);
+                let mut data = self.get(&SBCHash { key : parent_hash, chunk_type : ChunkType::Simple}).unwrap().clone();
+
+                let mut index = 4;
+                while index < sbc_value.len() {
+                    buf.copy_from_slice(&sbc_value[index..index+4]);
+                    let delta_action = u32::from_be_bytes(buf);
+
+                    let (action, index, byte_value) = get_delta_action(delta_action);
+                    match action {
+                        Del => {
+                            data.remove(index);
+                        }
+                        Add => data.insert(index + 1, byte_value),
+                        Rep => data[index] = byte_value,
+                    }
+                }
+                index += 4;
+                data
+            }
+        };
+        Ok(chunk)
     }
 
-    fn remove(&mut self, sbc_hash: &u32) {
+    fn remove(&mut self, sbc_hash: &SBCHash) {
         self.sbc_hashmap.remove(sbc_hash);
     }
 
-    fn contains(&self, key: &u32) -> bool {
+    fn contains(&self, key: &SBCHash) -> bool {
         self.sbc_hashmap.contains_key(key)
     }
+
 }
 
 pub struct SBCScrubber {
     graph: Graph,
-    delta_codes_hashmap: HashMap<u32, (u32, Vec<DeltaAction>)>,
 }
 
-impl<Hash: ChunkHash, B> Scrub<Hash, B, u32> for SBCScrubber
-where
-    B: Database<Hash, DataContainer<u32>>,
-    for<'a> &'a mut B: IntoIterator<Item = (&'a Hash, &'a mut DataContainer<u32>)>,
+impl<Hash: ChunkHash, B> Scrub<Hash, B, SBCHash> for SBCScrubber
+    where
+        B: Database<Hash, DataContainer<SBCHash>>,
+        for<'a> &'a mut B: IntoIterator<Item = (&'a Hash, &'a mut DataContainer<SBCHash>)>,
 {
     fn scrub<'a>(
         &mut self,
         database: &mut B,
-        target_map: &mut Box<dyn Database<u32, Vec<u8>>>,
+        target_map: &mut Box<dyn Database<SBCHash, Vec<u8>>>,
     ) -> io::Result<ScrubMeasurements>
-    where
-        Hash: 'a,
+        where
+            Hash: 'a,
     {
+        let time_start = Instant::now();
         let mut keys = Vec::new();
 
-        for (_, data_container) in database {
+        for (_, data_container) in database.into_iter() {
             let chunk = data_container.extract();
             match chunk {
                 Data::Chunk(data) => {
                     let sbc_hash = hash_function::hash(data.as_slice());
-                    let _ = target_map.insert(sbc_hash, data.clone());
+                    let _ = target_map.insert(SBCHash {key : sbc_hash, chunk_type : ChunkType::Simple}, data.clone());
                     keys.push(sbc_hash);
-                    data_container.make_target(vec![sbc_hash]);
                 }
                 Data::TargetChunk(_) => {}
             }
         }
 
-        let modified_clusters = self
-            .graph
-            .update_graph_based_on_the_kraskal_algorithm(keys.as_slice());
-        self.set_parents_in_clusters(target_map, &modified_clusters);
-        self.encode_map(target_map, &modified_clusters);
 
-        Ok(ScrubMeasurements::default())
+        let mut processed_data = 0;
+        let mut data_left = 0;
+
+        let modified_clusters = self.graph.update_graph_based_on_the_kraskal_algorithm(keys.as_slice());
+        self.graph.set_parents_in_clusters(target_map, &modified_clusters);
+        let mut key_index = 0;
+        for (_, data_container) in database.into_iter() {
+            let chunk = data_container.extract();
+            match chunk {
+                Data::Chunk(data) => {
+                    if self.graph.vertices.get(&keys[key_index]).unwrap().parent == keys[key_index] {
+                        data_left += data.len();
+                        data_container.make_target(vec![SBCHash { key : keys[key_index], chunk_type : ChunkType::Simple }]);
+                    } else {
+                        processed_data += data.len();
+                        data_container.make_target(vec![ SBCHash { key : keys[key_index], chunk_type : ChunkType::Delta }])
+                    }
+                }
+                Data::TargetChunk(_) => {}
+            }
+            key_index += 1;
+        }
+
+        encode_map(&mut self.graph, target_map, &modified_clusters);
+
+        let running_time = time_start.elapsed();
+        Ok(ScrubMeasurements{
+            processed_data,
+            running_time,
+            data_left,
+        })
+    }
+
+}
+
+
+
+fn encode_map(graph : &mut Graph, target_map : &mut Box<dyn Database<SBCHash, Vec<u8>>>, clusters : &HashMap<u32, Vec<u32>>) {
+    for (hash_parent_cluster, cluster) in clusters.iter() {
+        let parent_hash = graph.find_set(*hash_parent_cluster);
+        let mut parent_chunk_data = Vec::new();
+
+        if target_map.contains(&SBCHash { key : parent_hash, chunk_type : ChunkType::Delta}) {
+            parent_chunk_data = target_map.get(&SBCHash { key : parent_hash, chunk_type : ChunkType::Delta}).unwrap().clone();
+            target_map.remove(&SBCHash { key : parent_hash, chunk_type : ChunkType::Delta});
+            let _ = target_map.insert(SBCHash { key : parent_hash, chunk_type : ChunkType::Simple}, parent_chunk_data.clone());
+        } else {
+            parent_chunk_data = target_map.get(&SBCHash { key : parent_hash, chunk_type : ChunkType::Simple}).unwrap().clone();
+        }
+
+        for hash in cluster {
+            if *hash == parent_hash { continue; }
+            let chunk_data = get_chunk_data(target_map, *hash);
+            let mut delta_chunk = Vec::new();
+            for byte in parent_hash.to_be_bytes() {
+                delta_chunk.push(byte);
+            }
+
+            for delta_action in levenshtein_functions::encode(chunk_data.as_slice(), parent_chunk_data.as_slice()) {
+                for byte in delta_action.to_be_bytes() {
+                    delta_chunk.push(byte);
+                }
+            }
+            if target_map.contains(&SBCHash { key : *hash, chunk_type : ChunkType::Simple }) {
+                target_map.remove(&SBCHash { key : *hash, chunk_type : ChunkType::Simple });
+            }
+            let _ = target_map.insert(SBCHash { key : *hash, chunk_type : ChunkType::Delta }, delta_chunk);
+        }
     }
 }
 
-impl SBCScrubber {
-    pub fn set_parents_in_clusters(
-        &mut self,
-        target_map: &mut Box<dyn Database<u32, Vec<u8>>>,
-        clusters: &HashMap<u32, Vec<u32>>,
-    ) {
-        for (parent_hash_past, cluster) in clusters {
-            let parent_key = self.find_parent_key_in_cluster(target_map, cluster.as_slice());
-            self.graph.vertices.get_mut(&parent_key).unwrap().rank =
-                self.graph.vertices.get(parent_hash_past).unwrap().rank;
-            for hash in cluster.iter() {
-                self.graph.vertices.get_mut(hash).unwrap().parent = parent_key
-            }
-        }
-    }
+fn get_delta_action(code : u32) -> (Action, usize, u8) {
+    let action = match code / (1 << 30) {
+        0 => Rep,
+        1 => Add,
+        2 => Del,
+        _ => panic!(),
+    };
+    let byte_value = code % (1 << 30) / (1 << 22);
+    let index = code % (1 << 22);
+    (action, index as usize, byte_value as u8)
+}
 
-    fn find_parent_key_in_cluster(
-        &mut self,
-        target_map: &mut Box<dyn Database<u32, Vec<u8>>>,
-        cluster: &[u32],
-    ) -> u32 {
-        let mut leader_hash = cluster[0];
-        let mut min_sum_dist = u32::MAX;
-
-        for chunk_hash_1 in cluster.iter() {
-            let mut sum_dist_for_chunk = 0u32;
-            let chunk_data_1 = self.get_data_chunk(chunk_hash_1, target_map);
-
-            for chunk_hash_2 in cluster.iter() {
-                if *chunk_hash_1 == *chunk_hash_2 {
-                    continue;
-                }
-
-                let chunk_data_2 = self.get_data_chunk(chunk_hash_2, target_map);
-                sum_dist_for_chunk +=
-                    levenshtein_distance(chunk_data_1.as_slice(), chunk_data_2.as_slice());
-            }
-
-            if sum_dist_for_chunk < min_sum_dist {
-                leader_hash = *chunk_hash_1;
-                min_sum_dist = sum_dist_for_chunk
-            }
-        }
-        leader_hash
-    }
-
-    pub fn get_delta_chunk(
-        &mut self,
-        key: &u32,
-        target_map: &Box<dyn Database<u32, Vec<u8>>>,
-    ) -> Vec<u8> {
-        let parent_key = self.delta_codes_hashmap.get(key).unwrap().0;
-        let mut data = target_map.get(&parent_key).unwrap().clone();
-
-        for delta_action in &self.delta_codes_hashmap.get(key).unwrap().1 {
-            let (action, index, byte_value) = delta_action.get();
-            match action {
-                Action::Del => {
-                    data.remove(index);
-                }
-                Action::Add => data.insert(index + 1, byte_value),
-                Action::Rep => data[index] = byte_value,
-            }
-        }
-        data
-    }
-
-    fn get_data_chunk(
-        &mut self,
-        key: &u32,
-        target_map: &Box<dyn Database<u32, Vec<u8>>>,
-    ) -> Vec<u8> {
-        if target_map.contains(key) {
-            target_map.get(key).unwrap().clone()
-        } else {
-            self.get_delta_chunk(key, target_map)
-        }
-    }
-
-    fn encode_map(
-        &mut self,
-        target_map: &mut Box<dyn Database<u32, Vec<u8>>>,
-        clusters: &HashMap<u32, Vec<u32>>,
-    ) {
-        for (past_parent_key, cluster) in clusters.iter() {
-            let parent_key = self.graph.find_set(*past_parent_key);
-            let parent_chunk_data = self.get_data_chunk(&parent_key, target_map);
-
-            let _ = target_map.insert(parent_key, parent_chunk_data.clone());
-
-            for key in cluster {
-                let delta_chunk = self.delta_codes_hashmap.get(key).unwrap();
-                if delta_chunk.0 == parent_key {
-                    continue;
-                }
-
-                let chunk_data = self.get_data_chunk(key, target_map);
-                self.delta_codes_hashmap.insert(
-                    *key,
-                    (
-                        parent_key,
-                        levenshtein_functions::encode(
-                            chunk_data.as_slice(),
-                            parent_chunk_data.as_slice(),
-                        ),
-                    ),
-                );
-
-                if target_map.contains(key) {
-                    target_map.remove(key);
-                }
-            }
-        }
+pub fn get_chunk_data(target_map : &mut Box<dyn Database<SBCHash, Vec<u8>>>, hash : u32) -> Vec<u8> {
+    if target_map.contains(&SBCHash{key : hash, chunk_type : ChunkType::Delta}) {
+        target_map.get(&SBCHash{key : hash, chunk_type : ChunkType::Delta}).unwrap()
+    } else {
+        target_map.get(&SBCHash{key : hash, chunk_type : ChunkType::Simple}).unwrap()
     }
 }
