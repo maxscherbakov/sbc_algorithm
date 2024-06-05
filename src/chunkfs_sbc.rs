@@ -26,9 +26,9 @@ impl Database<SBCHash, Vec<u8>> for SBCMap {
                 let parent_hash = u32::from_be_bytes(buf);
                 let mut data = self.get(&SBCHash { key : parent_hash, chunk_type : ChunkType::Simple}).unwrap().clone();
 
-                let mut index = 4;
-                while index < sbc_value.len() {
-                    buf.copy_from_slice(&sbc_value[index..index+4]);
+                let mut byte_index = 4;
+                while byte_index < sbc_value.len() {
+                    buf.copy_from_slice(&sbc_value[byte_index..byte_index+4]);
                     let delta_action = u32::from_be_bytes(buf);
 
                     let (action, index, byte_value) = get_delta_action(delta_action);
@@ -39,8 +39,8 @@ impl Database<SBCHash, Vec<u8>> for SBCMap {
                         Add => data.insert(index + 1, byte_value),
                         Rep => data[index] = byte_value,
                     }
+                    byte_index += 4;
                 }
-                index += 4;
                 data
             }
         };
