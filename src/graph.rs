@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-const MAX_WEIGHT_EDGE: u32 = 1 << 20;
+const MAX_WEIGHT_EDGE: u32 = 1 << 10;
 
 pub struct Vertex {
     pub(crate) parent: u32,
@@ -130,15 +130,15 @@ impl Graph {
         for hash_1 in keys {
             let mut min_dist = u32::MAX;
             let mut hash_2 = 0;
-            for other_hash in keys
-            // *hash_1 - std::cmp::min(*hash_1, MAX_WEIGHT_EDGE)
-            //     ..=*hash_1 + std::cmp::min(u32::MAX - *hash_1, MAX_WEIGHT_EDGE)
+            for other_hash in
+            *hash_1 - std::cmp::min(*hash_1, MAX_WEIGHT_EDGE)
+                ..=*hash_1 + std::cmp::min(u32::MAX - *hash_1, MAX_WEIGHT_EDGE)
             {
-                if (*hash_1).abs_diff(*other_hash) <= MAX_WEIGHT_EDGE {
+                if self.vertices.contains_key(&other_hash) {
                     let dist = std::cmp::max(hash_2, *hash_1) - std::cmp::min(hash_2, *hash_1);
                     if dist < min_dist {
                         min_dist = dist;
-                        hash_2 = *other_hash;
+                        hash_2 = other_hash;
                     }
                 }
             }
