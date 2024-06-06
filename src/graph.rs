@@ -1,10 +1,6 @@
 use std::collections::HashMap;
-use crate::SBCHash;
-use crate::levenshtein_functions::levenshtein_distance;
-use chunkfs::Database;
-use crate::chunkfs_sbc::get_chunk_data;
 
-const MAX_WEIGHT_EDGE: u32 = 1 << 8;
+const MAX_WEIGHT_EDGE: u32 = 1 << 20;
 
 pub struct Vertex {
     pub(crate) parent: u32,
@@ -32,7 +28,7 @@ pub struct Graph {
 
 impl Graph {
     #[allow(dead_code)]
-    pub(crate) fn new() -> Graph {
+    pub fn new() -> Graph {
         Graph {
             vertices: HashMap::new(),
         }
@@ -134,17 +130,20 @@ impl Graph {
         for hash_1 in keys {
             let mut min_dist = u32::MAX;
             let mut hash_2 = 0;
-            for other_hash in *hash_1 - std::cmp::min(*hash_1, MAX_WEIGHT_EDGE)
-                ..=*hash_1 + std::cmp::min(u32::MAX - *hash_1, MAX_WEIGHT_EDGE)
+            for other_hash in keys
+            // *hash_1 - std::cmp::min(*hash_1, MAX_WEIGHT_EDGE)
+            //     ..=*hash_1 + std::cmp::min(u32::MAX - *hash_1, MAX_WEIGHT_EDGE)
             {
-                if !self.vertices.contains_key(&hash_2) {
-                    continue;
+                if (*hash_1).abs_diff(*other_hash) <= MAX_WEIGHT_EDGE {
+                    let dist = std::cmp::max(hash_2, *hash_1) - std::cmp::min(hash_2, *hash_1);
+                    if dist < min_dist {
+                        min_dist = dist;
+                        hash_2 = *other_hash;
+                    }
                 }
-                let dist = std::cmp::max(hash_2, *hash_1) - std::cmp::min(hash_2, *hash_1);
-                if dist < min_dist {
-                    min_dist = dist;
-                    hash_2 = other_hash;
-                }
+            }
+            if hash_2 == 0 {
+                continue;
             }
             edges.push(Edge {
                 weight: min_dist,
@@ -154,48 +153,4 @@ impl Graph {
         }
         edges
     }
-
-    pub fn set_parents_in_clusters(
-        &mut self,
-        target_map: &mut Box<dyn Database<SBCHash, Vec<u8>>>,
-        clusters: &HashMap<u32, Vec<u32>>,
-    ) {
-        for (parent_hash_past, cluster) in clusters {
-            let parent_key = find_parent_key_in_cluster(target_map, cluster.as_slice());
-            self.vertices.get_mut(&parent_key).unwrap().rank =
-                self.vertices.get(parent_hash_past).unwrap().rank;
-            for hash in cluster.iter() {
-                self.vertices.get_mut(hash).unwrap().parent = parent_key
-            }
-        }
-    }
-}
-
-fn find_parent_key_in_cluster(
-    target_map: &mut Box<dyn Database<SBCHash, Vec<u8>>>,
-    cluster: &[u32],
-) -> u32 {
-    let mut leader_hash = cluster[0];
-    let mut min_sum_dist = u32::MAX;
-
-    for chunk_hash_1 in cluster.iter() {
-        let mut sum_dist_for_chunk = 0u32;
-        let chunk_data_1 = get_chunk_data(target_map, *chunk_hash_1);
-
-        for chunk_hash_2 in cluster.iter() {
-            if *chunk_hash_1 == *chunk_hash_2 {
-                continue;
-            }
-
-            let chunk_data_2 = get_chunk_data(target_map, *chunk_hash_2);
-            sum_dist_for_chunk +=
-                levenshtein_distance(chunk_data_1.as_slice(), chunk_data_2.as_slice());
-        }
-
-        if sum_dist_for_chunk < min_sum_dist {
-            leader_hash = *chunk_hash_1;
-            min_sum_dist = sum_dist_for_chunk
-        }
-    }
-    leader_hash
 }
