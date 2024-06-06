@@ -64,6 +64,13 @@ impl Database<SBCHash, Vec<u8>> for SBCMap {
 pub struct SBCScrubber {
     graph: Graph,
 }
+impl SBCScrubber {
+    fn new() -> SBCScrubber {
+        SBCScrubber {
+            graph : Graph::new(),
+        }
+    }
+}
 
 impl<Hash: ChunkHash, B> Scrub<Hash, B, SBCHash> for SBCScrubber
     where

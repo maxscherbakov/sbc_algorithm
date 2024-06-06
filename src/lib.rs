@@ -1,5 +1,6 @@
 pub use hash_function::hash;
 use std::collections::HashMap;
+pub use chunkfs_sbc::SBCScrubber;
 
 mod chunkfs_sbc;
 mod graph;
