@@ -18,7 +18,6 @@ pub fn main() -> Result<(), std::io::Error> {
         let length = chunk.length;
         let mut bytes = vec![0; length];
         buffer.read_exact(&mut bytes)?;
-
         cdc_vec.push((hash(bytes.as_slice()), bytes));
     }
 
