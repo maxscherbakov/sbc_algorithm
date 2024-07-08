@@ -8,6 +8,8 @@ use crate::levenshtein_functions::Action::{Add, Del, Rep};
 use crate::{SBCHash};
 use std::time::{Instant};
 
+const DELTA_CHUNK_SIZE: usize = 4;
+
 impl Database<SBCHash, Vec<u8>> for SBCMap {
     fn insert(&mut self, sbc_hash: SBCHash, chunk: Vec<u8>) -> io::Result<()> {
         self.sbc_hashmap.insert(sbc_hash, chunk);
@@ -20,9 +22,8 @@ impl Database<SBCHash, Vec<u8>> for SBCMap {
         let chunk = match sbc_hash.chunk_type {
             ChunkType::Simple { } => { sbc_value.clone() }
             ChunkType::Delta { } => {
-                let mut buf = [0u8; 4];
-                buf.copy_from_slice(&sbc_value[..4]);
-
+                let mut buf = [0u8; DELTA_CHUNK_SIZE];
+                buf.copy_from_slice(&sbc_value[..DELTA_CHUNK_SIZE]);
                 let parent_hash = u32::from_be_bytes(buf);
                 let mut data = if self.contains(&SBCHash{key : parent_hash, chunk_type : ChunkType::Delta}) {
                     self.get(&SBCHash{key : parent_hash, chunk_type : ChunkType::Delta}).unwrap()
@@ -30,7 +31,7 @@ impl Database<SBCHash, Vec<u8>> for SBCMap {
                     self.get(&SBCHash{key : parent_hash, chunk_type : ChunkType::Simple}).unwrap()
                 };
 
-                let mut byte_index = 4;
+                let mut byte_index = DELTA_CHUNK_SIZE;
                 while byte_index < sbc_value.len() {
                     buf.copy_from_slice(&sbc_value[byte_index..byte_index+4]);
                     let delta_action = u32::from_be_bytes(buf);
@@ -43,7 +44,7 @@ impl Database<SBCHash, Vec<u8>> for SBCMap {
                         Add => data.insert(index + 1, byte_value),
                         Rep => data[index] = byte_value,
                     }
-                    byte_index += 4;
+                    byte_index += DELTA_CHUNK_SIZE;
                 }
                 data
             }
@@ -73,20 +74,23 @@ impl SBCScrubber {
 }
 
 impl<Hash: ChunkHash, B> Scrub<Hash, B, SBCHash> for SBCScrubber
-    where
-        B: Database<Hash, DataContainer<SBCHash>>,
-        for<'a> &'a mut B: IntoIterator<Item = (&'a Hash, &'a mut DataContainer<SBCHash>)>,
+where
+    B: Database<Hash, DataContainer<SBCHash>>,
+    for<'a> &'a mut B: IntoIterator<Item = (&'a Hash, &'a mut DataContainer<SBCHash>)>,
 {
     fn scrub<'a>(
         &mut self,
         database: &mut B,
         target_map: &mut Box<dyn Database<SBCHash, Vec<u8>>>,
     ) -> io::Result<ScrubMeasurements>
-        where
-            Hash: 'a,
+    where
+        Hash: 'a,
     {
         let time_start = Instant::now();
         let mut keys = Vec::new();
+        let mut key_index = 0;
+        let mut processed_data = 0;
+        let mut data_left = 0;
 
         for (_, data_container) in database.into_iter() {
             let chunk = data_container.extract();
@@ -100,14 +104,9 @@ impl<Hash: ChunkHash, B> Scrub<Hash, B, SBCHash> for SBCScrubber
             }
         }
 
-
-        let mut processed_data = 0;
-        let mut data_left = 0;
-
-        let modified_clusters = self.graph.update_graph_based_on_the_kraskal_algorithm(keys.as_slice());
+        let modified_clusters = self.graph.update_graph_kruskal_algorithm(keys.as_slice());
         encode_map(&mut self.graph, target_map, &modified_clusters);
 
-        let mut key_index = 0;
         for (_, data_container) in database.into_iter() {
             let chunk = data_container.extract();
             match chunk {
@@ -139,15 +138,15 @@ impl<Hash: ChunkHash, B> Scrub<Hash, B, SBCHash> for SBCScrubber
 
 fn encode_map(graph : &mut Graph, target_map : &mut Box<dyn Database<SBCHash, Vec<u8>>>, clusters : &HashMap<u32, Vec<u32>>) {
     for (hash_parent_cluster, cluster) in clusters.iter() {
+        let mut parent_chunk_data = Vec::new();
         let parent_hash = find_parent_key_in_cluster(target_map, cluster.as_slice());
+
         graph.vertices.get_mut(&parent_hash).unwrap().rank =
             graph.vertices.get(&hash_parent_cluster).unwrap().rank;
 
         for hash in cluster {
             graph.vertices.get_mut(hash).unwrap().parent = parent_hash
         }
-
-        let mut parent_chunk_data = Vec::new();
 
         if target_map.contains(&SBCHash { key : parent_hash, chunk_type : ChunkType::Delta}) {
             parent_chunk_data = target_map.get(&SBCHash { key : parent_hash, chunk_type : ChunkType::Delta}).unwrap().clone();
@@ -156,9 +155,8 @@ fn encode_map(graph : &mut Graph, target_map : &mut Box<dyn Database<SBCHash, Ve
         } else {
             parent_chunk_data = target_map.get(&SBCHash { key : parent_hash, chunk_type : ChunkType::Simple}).unwrap().clone();
         }
-
         for hash in cluster {
-            if *hash == parent_hash { continue; }
+            if *hash == parent_hash { continue }
             let chunk_data = get_chunk_data(target_map, *hash);
             let mut delta_chunk = Vec::new();
             for byte in parent_hash.to_be_bytes() {
@@ -248,15 +246,14 @@ mod test {
     fn test_data_recovery() -> Result<(), std::io::Error> {
         let contents = fs::read(PATH).unwrap();
         let chunks = FastCDC::new(&contents, 1000, 2000, 65536);
-
         let input = File::open(PATH)?;
         let mut buffer = BufReader::new(input);
-
-
         let mut keys = Vec::new();
-        let mut datas = HashMap::new();
+        let mut chunks_uncoded = HashMap::new();
         let mut target_map : Box<dyn Database<SBCHash, Vec<u8>>> = Box::new(SBCMap::new());
         let mut graph = Graph::new();
+        let mut processed_data = 0;
+        let mut data_left = 0;
         let time_start = Instant::now();
 
         for chunk in chunks {
@@ -265,19 +262,15 @@ mod test {
             buffer.read_exact(&mut bytes)?;
 
             let sbc_hash = hash(bytes.as_slice());
-            datas.insert(sbc_hash, bytes.clone());
+            chunks_uncoded.insert(sbc_hash, bytes.clone());
             let _ = target_map.insert(SBCHash {key : sbc_hash, chunk_type : ChunkType::Simple}, bytes);
             keys.push(sbc_hash);
         }
 
-        let mut processed_data = 0;
-        let mut data_left = 0;
-
-        let modified_clusters = graph.update_graph_based_on_the_kraskal_algorithm(keys.as_slice());
+        let modified_clusters = graph.update_graph_kruskal_algorithm(keys.as_slice());
         encode_map(&mut graph, &mut target_map, &modified_clusters);
 
-
-        for (key, data) in datas.iter() {
+        for (key, data) in chunks_uncoded.iter() {
             if graph.vertices.get(key).unwrap().parent == *key {
                 data_left += data.len();
             } else {
@@ -288,15 +281,16 @@ mod test {
 
         let running_time = time_start.elapsed();
 
-        let mut count_delta_chunk = 0;
+        let mut is_delta_chunk = false;
         for key in keys {
-            if target_map.contains(&SBCHash {key : key, chunk_type : ChunkType::Delta}) {
-                count_delta_chunk += 1;
+            if target_map.contains(&SBCHash {key, chunk_type : ChunkType::Delta}) {
+                is_delta_chunk = true;
+                break;
             }
             let recover_data = get_chunk_data(&target_map, key);
-            assert_eq!(recover_data, datas.get(&key).unwrap().clone());
+            assert_eq!(recover_data, chunks_uncoded.get(&key).unwrap().clone());
         }
-        assert!(count_delta_chunk > 0);
+        assert!(is_delta_chunk);
 
         ScrubMeasurements{
             processed_data,
@@ -306,6 +300,8 @@ mod test {
         Ok(())
     }
 
+
+    #[allow(dead_code)]
     fn test_chunk_recover() -> Result<(), std::io::Error> {
         let mut target_map : Box<dyn Database<SBCHash, Vec<u8>>> = Box::new(SBCMap::new());
         let chunk_1 = vec![12u8, 18, 19, 20];

@@ -10,6 +10,9 @@ const BLOCKS_FOR_P_SPECTRUM_INDEXES: Range<usize> = 5..9;
 
 fn processing_of_c_spectrum(c_f_spectrum: &[(&u8, &u32)]) -> u32 {
     let mut spaces_in_c_spectrum = Vec::new();
+    let mut hash: u32 = 0;
+    let mut start_block = 0;
+
     for byte_index in 1..c_f_spectrum.len() {
         let frequency_delta =
             (c_f_spectrum[byte_index - 1].1 - c_f_spectrum[byte_index].1) * byte_index as u32;
@@ -28,9 +31,6 @@ fn processing_of_c_spectrum(c_f_spectrum: &[(&u8, &u32)]) -> u32 {
     }
     spaces_in_c_spectrum_indexes.sort();
 
-    let mut hash: u32 = 0;
-
-    let mut start_block = 0;
     for (block_number, block) in spaces_in_c_spectrum_indexes.iter().enumerate() {
         let end_block = *block;
         let block = &c_f_spectrum[start_block..end_block];

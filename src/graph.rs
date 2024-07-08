@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::hash::Hash;
+use std::vec::IntoIter;
 
 const MAX_WEIGHT_EDGE: u32 = 1 << 10;
 
@@ -86,7 +88,7 @@ impl Graph {
         hash_set
     }
 
-    pub fn update_graph_based_on_the_kraskal_algorithm(
+    pub fn update_graph_kruskal_algorithm(
         &mut self,
         keys: &[u32],
     ) -> HashMap<u32, Vec<u32>> {
@@ -131,8 +133,8 @@ impl Graph {
             let mut min_dist = u32::MAX;
             let mut hash_2 = 0;
             for other_hash in
-            *hash_1 - std::cmp::min(*hash_1, MAX_WEIGHT_EDGE)
-                ..=*hash_1 + std::cmp::min(u32::MAX - *hash_1, MAX_WEIGHT_EDGE)
+                *hash_1 - std::cmp::min(*hash_1, MAX_WEIGHT_EDGE)
+                    ..=*hash_1 + std::cmp::min(u32::MAX - *hash_1, MAX_WEIGHT_EDGE)
             {
                 if self.vertices.contains_key(&other_hash) {
                     let dist = std::cmp::max(hash_2, *hash_1) - std::cmp::min(hash_2, *hash_1);

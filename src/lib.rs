@@ -23,7 +23,6 @@ pub struct SBCHash {
 }
 
 
-#[allow(dead_code)]
 pub struct SBCMap {
     sbc_hashmap: HashMap<SBCHash, Vec<u8>>,
 }
