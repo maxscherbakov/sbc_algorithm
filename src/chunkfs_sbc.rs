@@ -75,7 +75,7 @@ pub struct SBCScrubber {
     graph: Graph,
 }
 impl SBCScrubber {
-    fn new() -> SBCScrubber {
+    pub fn new() -> SBCScrubber {
         SBCScrubber {
             graph: Graph::new(),
         }
