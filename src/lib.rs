@@ -1,6 +1,6 @@
+pub use chunkfs_sbc::SBCScrubber;
 pub use hash_function::hash;
 use std::collections::HashMap;
-pub use chunkfs_sbc::SBCScrubber;
 
 mod chunkfs_sbc;
 mod graph;
@@ -13,15 +13,16 @@ enum ChunkType {
     Simple,
 }
 impl Default for ChunkType {
-    fn default() -> Self { ChunkType::Simple }
+    fn default() -> Self {
+        ChunkType::Simple
+    }
 }
 
 #[derive(Hash, PartialEq, Eq, Clone, Default)]
 pub struct SBCHash {
-    key : u32,
+    key: u32,
     chunk_type: ChunkType,
 }
-
 
 #[allow(dead_code)]
 pub struct SBCMap {

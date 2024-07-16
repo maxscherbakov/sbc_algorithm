@@ -9,7 +9,7 @@ pub(crate) enum Action {
 
 pub(crate) fn encode(data_chunk: &[u8], data_chunk_parent: &[u8]) -> Vec<u32> {
     let matrix = levenshtein_matrix(data_chunk, data_chunk_parent);
-    let mut delta_code= Vec::new();
+    let mut delta_code = Vec::new();
     let mut x = data_chunk.len();
     let mut y = data_chunk_parent.len();
     while x > 0 && y > 0 {
