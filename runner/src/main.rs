@@ -1,28 +1,35 @@
 extern crate sbc_algorithm;
-use sbc_algorithm::{hash, SBCMap};
-use std::fs;
-use std::fs::File;
-use std::io::{BufReader, Read};
+extern crate chunkfs;
 
-pub fn main() -> Result<(), std::io::Error> {
-    let path = "files/test1.txt";
-    let input = File::open(path)?;
-    println!("size before chunking: {}", input.metadata().unwrap().len());
+use sbc_algorithm::{SBCMap, SBCScrubber};
+use std::io;
+use chunkfs::FileSystem;
+use std::collections::HashMap;
+use chunkfs::hashers::Sha256Hasher;
+use chunkfs::chunkers::SuperChunker;
 
-    let mut buffer = BufReader::new(input);
-    let contents = fs::read(path).unwrap();
-    let chunks = fastcdc::v2020::FastCDC::new(&contents, 1000, 2000, 65536);
-    let mut cdc_vec = Vec::new();
 
-    for chunk in chunks {
-        let length = chunk.length;
-        let mut bytes = vec![0; length];
-        buffer.read_exact(&mut bytes)?;
+fn main() -> io::Result<()> {
+    let mut fs = FileSystem::new(HashMap::default(), Box::new(SBCMap::new()), Box::new(SBCScrubber::new()), Sha256Hasher::default());
 
-        cdc_vec.push((hash(bytes.as_slice()), bytes));
-    }
+    let mut handle = fs.create_file("file".to_string(), SuperChunker::new(), true)?;
+    let data = generate_data(4);
+    fs.write_to_file(&mut handle, &data)?;
+    fs.close_file(handle)?;
 
-    let _sbc_map = SBCMap::new();
+    let res = fs.scrub().unwrap();
+    println!("{res:?}");
 
+    let mut handle = fs.open_file("file", SuperChunker::new())?;
+    let read = fs.read_file_complete(&mut handle)?;
+    assert_eq!(read.len(), data.len());
     Ok(())
 }
+
+const MB: usize = 1024 * 1024;
+
+fn generate_data(mb_size: usize) -> Vec<u8> {
+    let bytes = mb_size * MB;
+    (0..bytes).map(|_| rand::random::<u8>()).collect()
+}
+
