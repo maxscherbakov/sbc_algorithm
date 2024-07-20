@@ -7,15 +7,11 @@ mod graph;
 mod hash_function;
 mod levenshtein_functions;
 
-#[derive(Hash, PartialEq, Eq, Clone)]
+#[derive(Hash, PartialEq, Eq, Clone, Default)]
 enum ChunkType {
     Delta,
+    #[default]
     Simple,
-}
-impl Default for ChunkType {
-    fn default() -> Self {
-        ChunkType::Simple
-    }
 }
 
 #[derive(Hash, PartialEq, Eq, Clone, Default)]
@@ -24,7 +20,6 @@ pub struct SBCHash {
     chunk_type: ChunkType,
 }
 
-#[allow(dead_code)]
 pub struct SBCMap {
     sbc_hashmap: HashMap<SBCHash, Vec<u8>>,
 }
@@ -34,5 +29,11 @@ impl SBCMap {
         SBCMap {
             sbc_hashmap: HashMap::new(),
         }
+    }
+}
+
+impl Default for SBCMap {
+    fn default() -> Self {
+        Self::new()
     }
 }

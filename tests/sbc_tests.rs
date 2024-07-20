@@ -10,7 +10,6 @@ mod test {
     #[test]
     fn test_data_recovery() {
         let mut fs = FileSystem::new(HashMap::default(), Box::new(SBCMap::new()), Box::new(SBCScrubber::new()), Sha256Hasher::default());
-
         let mut handle = fs.create_file("file".to_string(), SuperChunker::new(), true).unwrap();
         let data = generate_data(4);
         fs.write_to_file(&mut handle, &data).unwrap();

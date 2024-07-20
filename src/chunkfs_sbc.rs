@@ -77,6 +77,7 @@ impl Database<SBCHash, Vec<u8>> for SBCMap {
 pub struct SBCScrubber {
     graph: Graph,
 }
+
 impl SBCScrubber {
     pub fn new() -> SBCScrubber {
         SBCScrubber {
@@ -84,6 +85,13 @@ impl SBCScrubber {
         }
     }
 }
+
+impl Default for SBCScrubber {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 
 
 impl<Hash: ChunkHash, B> Scrub<Hash, B, SBCHash> for SBCScrubber
@@ -102,33 +110,27 @@ where
         let time_start = Instant::now();
         let mut processed_data = 0;
         let mut data_left = 0;
-        let mut chunk_index = 0usize;
         let mut clusters : HashMap<u32, Vec<(u32, &mut DataContainer<SBCHash>)>> = HashMap::new();
-        for (_, data_container) in database.into_iter() {
+        for (chunk_index, (_, data_container)) in database.into_iter().enumerate() {
             if chunk_index % MAX_COUNT_CHUNKS_IN_PACK == 0 {
-                for (_, cluster) in clusters.iter_mut() {
-                    let data_analyse = encode_cluster(target_map, cluster.as_mut_slice());
-                    data_left += data_analyse.0;
-                    processed_data += data_analyse.1;
-                }
+                let (clusters_data_left, clusters_processed_data) = encode_clusters(&mut clusters, target_map);
+                data_left += clusters_data_left;
+                processed_data += clusters_processed_data;
                 clusters = HashMap::new();
             }
             match data_container.extract() {
                 Data::Chunk(data) => {
                     let sbc_hash = hash_function::hash(data.as_slice());
                     let parent_hash = self.graph.add_vertex(sbc_hash);
-                    let cluster = clusters.entry(parent_hash).or_insert(Vec::new());
+                    let cluster = clusters.entry(parent_hash).or_default();
                     cluster.push((sbc_hash, data_container));
                 }
                 Data::TargetChunk(_) => {}
             }
-            chunk_index += 1;
         }
-        for (_, cluster) in clusters.iter_mut() {
-            let data_analyse = encode_cluster(target_map, cluster.as_mut_slice());
-            data_left += data_analyse.0;
-            processed_data += data_analyse.1;
-        }
+        let (clusters_data_left, clusters_processed_data) = encode_clusters(&mut clusters, target_map);
+        data_left += clusters_data_left;
+        processed_data += clusters_processed_data;
         let running_time = time_start.elapsed();
         Ok(ScrubMeasurements {
             processed_data,
@@ -138,6 +140,17 @@ where
     }
 }
 
+fn encode_clusters(clusters : &mut HashMap<u32, Vec<(u32, &mut DataContainer<SBCHash>)>>,
+                   target_map: &mut Box<dyn Database<SBCHash, Vec<u8>>>) -> (usize, usize) {
+    let mut data_left = 0;
+    let mut processed_data = 0;
+    for (_, cluster) in clusters.iter_mut() {
+        let data_analyse = encode_cluster(target_map, cluster.as_mut_slice());
+        data_left += data_analyse.0;
+        processed_data += data_analyse.1;
+    }
+    (data_left, processed_data)
+}
 
 fn encode_cluster(target_map : &mut Box<dyn Database<SBCHash, Vec<u8>>>, cluster : &mut [(u32, &mut DataContainer<SBCHash>)]) -> (usize, usize) {
     let (parent_hash, parent_data) = find_parent_key_in_cluster(cluster);
@@ -148,11 +161,11 @@ fn encode_cluster(target_map : &mut Box<dyn Database<SBCHash, Vec<u8>>>, cluster
         match data_container.extract() {
             Data::Chunk(data) => {
                 if *hash == parent_hash {
-                    target_hash = SBCHash { key: hash.clone(), chunk_type: ChunkType::Simple };
+                    target_hash = SBCHash { key: *hash, chunk_type: ChunkType::Simple };
                     let _ = target_map.insert(target_hash.clone(), data.clone());
                     data_left += data.len();
                 } else {
-                    target_hash = SBCHash { key: hash.clone(), chunk_type: ChunkType::Delta };
+                    target_hash = SBCHash { key: *hash, chunk_type: ChunkType::Delta };
                     let mut delta_chunk = Vec::new();
                     for byte in parent_hash.to_be_bytes() {
                         delta_chunk.push(byte);

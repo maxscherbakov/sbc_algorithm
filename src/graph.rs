@@ -3,14 +3,13 @@ use std::collections::HashMap;
 const MAX_WEIGHT_EDGE: u32 = 1 << 15;
 
 pub struct Vertex {
-    pub(crate) parent: u32,
-    pub(crate) rank: u32,
+    parent: u32,
 }
+
 impl Vertex {
     pub fn new(key: u32) -> Vertex {
         Vertex {
             parent: key,
-            rank: 1,
         }
     }
 }
@@ -28,14 +27,11 @@ impl Graph {
 
     pub fn find_set(&mut self, hash_set: u32) -> u32 {
         let parent = self.vertices.get(&hash_set).unwrap().parent;
-        let rank = self.vertices.get(&hash_set).unwrap().rank;
-
         if hash_set != parent {
             let parent = self.find_set(parent);
-            self.vertices.insert(hash_set, Vertex { parent, rank });
-            return self.vertices.get(&hash_set).unwrap().parent;
+            self.vertices.get_mut(&hash_set).unwrap().parent = parent;
         }
-        hash_set
+        parent
     }
 
     pub fn add_vertex(&mut self, hash: u32) -> u32 {
@@ -54,7 +50,6 @@ impl Graph {
                 }
             }
         }
-
         self.vertices.insert(hash, Vertex::new(parent_hash));
         parent_hash
     }

@@ -12,16 +12,15 @@ pub(crate) fn encode(data_chunk: &[u8], data_chunk_parent: &[u8]) -> Vec<u32> {
     let mut delta_code = Vec::new();
     let mut x = data_chunk.len();
     let mut y = data_chunk_parent.len();
-    while x > 0 && y > 0 {
-        if (data_chunk_parent[y - 1] != data_chunk[x - 1]) && (matrix[y - 1][x - 1] < matrix[y][x])
-        {
+    while x > 0 || y > 0 {
+        if x > 0 && y > 0 && (data_chunk_parent[y - 1] != data_chunk[x - 1]) && (matrix[y - 1][x - 1] < matrix[y][x]) {
             delta_code.push(encode_delta_action(Rep, y - 1, data_chunk[x - 1]));
             x -= 1;
             y -= 1;
-        } else if matrix[y - 1][x] < matrix[y][x] {
+        } else if y > 0 && matrix[y - 1][x] < matrix[y][x] {
             delta_code.push(encode_delta_action(Del, y - 1, 0));
             y -= 1;
-        } else if matrix[y][x - 1] < matrix[y][x] {
+        } else if x > 0 && matrix[y][x - 1] < matrix[y][x] {
             delta_code.push(encode_delta_action(Add, y, data_chunk[x - 1]));
             x -= 1;
         } else {
@@ -29,16 +28,6 @@ pub(crate) fn encode(data_chunk: &[u8], data_chunk_parent: &[u8]) -> Vec<u32> {
             y -= 1;
         }
     }
-    while x > 0 && matrix[y][x - 1] < matrix[y][x] {
-        delta_code.push(encode_delta_action(Add, y, data_chunk[x - 1]));
-        x -= 1;
-    }
-
-    while y > 0 && matrix[y - 1][x] < matrix[y][x] {
-        delta_code.push(encode_delta_action(Del, y - 1, 0));
-        y -= 1;
-    }
-
     delta_code
 }
 
@@ -89,10 +78,7 @@ fn encode_delta_action(action: Action, index: usize, byte_value: u8) -> u32 {
 #[cfg(test)]
 mod test {
     use crate::levenshtein_functions;
-    use chunkfs::{Database};
     use crate::levenshtein_functions::Action;
-
-    const PATH: &str = "runner/files/test1.txt";
 
     #[test]
     fn test_chunk_recovery() {
