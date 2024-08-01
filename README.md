@@ -15,7 +15,7 @@ sbc_algorithm = { git = "https://github.com/maxscherbakov/sbc_algorithm.git" }
 
 ## Example
 	
-```toml
+```rust
 extern crate sbc_algorithm;
 extern crate chunkfs;
 
