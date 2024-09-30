@@ -99,7 +99,7 @@ mod test {
         let mut buf = [0u8; 4];
         buf.copy_from_slice(&delta_chunk[..4]);
 
-        let parent_hash = u32::from_be_bytes(buf);
+        let _parent_hash = u32::from_be_bytes(buf);
         let mut data_recovery = parent_chunk_data.clone();
 
         let mut byte_index = 4;

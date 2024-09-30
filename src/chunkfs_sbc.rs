@@ -2,9 +2,9 @@ use crate::graph::Graph;
 use crate::levenshtein_functions::Action::{Add, Del, Rep};
 use crate::levenshtein_functions::{levenshtein_distance, Action};
 use crate::SBCHash;
-use crate::{hash_function, levenshtein_functions, ChunkType, SBCMap};
+use crate::{hash_functions, levenshtein_functions, ChunkType, SBCMap};
 use chunkfs::{ChunkHash, Data, DataContainer, Database, Scrub, ScrubMeasurements};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::time::Instant;
 
@@ -110,27 +110,25 @@ where
         let time_start = Instant::now();
         let mut processed_data = 0;
         let mut data_left = 0;
+        let count_chunks = database.into_iter().count();
         let mut clusters : HashMap<u32, Vec<(u32, &mut DataContainer<SBCHash>)>> = HashMap::new();
         for (chunk_index, (_, data_container)) in database.into_iter().enumerate() {
-            if chunk_index % MAX_COUNT_CHUNKS_IN_PACK == 0 {
-                let (clusters_data_left, clusters_processed_data) = encode_clusters(&mut clusters, target_map);
-                data_left += clusters_data_left;
-                processed_data += clusters_processed_data;
-                clusters = HashMap::new();
-            }
             match data_container.extract() {
                 Data::Chunk(data) => {
-                    let sbc_hash = hash_function::hash(data.as_slice());
+                    let sbc_hash = hash_functions::hash(data.as_slice());
                     let parent_hash = self.graph.add_vertex(sbc_hash);
                     let cluster = clusters.entry(parent_hash).or_default();
                     cluster.push((sbc_hash, data_container));
                 }
                 Data::TargetChunk(_) => {}
             }
+            if chunk_index % MAX_COUNT_CHUNKS_IN_PACK == 0 || chunk_index == count_chunks - 1 {
+                let (clusters_data_left, clusters_processed_data) = encode_clusters(&mut clusters, target_map);
+                data_left += clusters_data_left;
+                processed_data += clusters_processed_data;
+                clusters = HashMap::new();
+            }
         }
-        let (clusters_data_left, clusters_processed_data) = encode_clusters(&mut clusters, target_map);
-        data_left += clusters_data_left;
-        processed_data += clusters_processed_data;
         let running_time = time_start.elapsed();
         Ok(ScrubMeasurements {
             processed_data,
@@ -236,4 +234,17 @@ fn find_parent_key_in_cluster(cluster: &[(u32, &mut DataContainer<SBCHash>)]) ->
         }
     }
     (leader_hash,leader_data)
+}
+
+fn set_for_chunk(data: &[u8]) -> HashSet<Vec<u8>> {
+    let size_word = 8;
+    let size_shingle = 5;
+    let size_block = size_word * size_shingle;
+    let mut set_blocks = HashSet::new();
+    let mut index_word = 0;
+    while index_word < data.len() {
+        set_blocks.insert(data[index_word..std::cmp::min(index_word+size_block, data.len())].to_vec());
+        index_word += size_word;
+    }
+    set_blocks
 }
