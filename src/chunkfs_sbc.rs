@@ -1,13 +1,15 @@
 use crate::graph::Graph;
 use crate::levenshtein_functions::Action::{Add, Del, Rep};
 use crate::levenshtein_functions::{levenshtein_distance, Action};
-use crate::SBCHash;
+use crate::{hash, SBCHash};
 use crate::{hash_functions, levenshtein_functions, ChunkType, SBCMap};
 use chunkfs::{ChunkHash, Data, DataContainer, Database, Scrub, ScrubMeasurements};
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::time::Instant;
 
+const WORD_LEN : usize = 8;
+const COUNT_WORDS : usize = 5;
 
 const MAX_COUNT_CHUNKS_IN_PACK : usize = 1024;
 
@@ -236,15 +238,55 @@ fn find_parent_key_in_cluster(cluster: &[(u32, &mut DataContainer<SBCHash>)]) ->
     (leader_hash,leader_data)
 }
 
-fn set_for_chunk(data: &[u8]) -> HashSet<Vec<u8>> {
-    let size_word = 8;
-    let size_shingle = 5;
-    let size_block = size_word * size_shingle;
+fn set_for_chunk(data: &[u8]) -> HashSet<u32> {
+    let size_block = WORD_LEN * COUNT_WORDS;
     let mut set_blocks = HashSet::new();
-    let mut index_word = 0;
-    while index_word < data.len() {
-        set_blocks.insert(data[index_word..std::cmp::min(index_word+size_block, data.len())].to_vec());
-        index_word += size_word;
+    let mut rabin_hash = rabin_hash_simple(&data[0..std::cmp::min(size_block, data.len())]);
+
+    for index_word in (0..data.len()).step_by(WORD_LEN) {
+        set_blocks.insert(rabin_hash);
+        if index_word + size_block > data.len() {
+            break
+        }
+        rabin_hash = rabin_hash_next(rabin_hash,
+                                     hash_word(&data[index_word..index_word + WORD_LEN]),
+                                     hash_word(&data[index_word + size_block..std::cmp::min(index_word + size_block + WORD_LEN, data.len())]));
     }
     set_blocks
 }
+
+fn rabin_hash_simple(data: &[u8]) -> u32{
+    let mut rabin_hash = 0;
+    let x = 43;
+    let q = (1 << 31) - 1;
+    for i in (0..data.len()).step_by(WORD_LEN) {
+        rabin_hash += hash_word(&data[i..i+WORD_LEN]) * x.pow(COUNT_WORDS - i / WORD_LEN) % q;
+    }
+    rabin_hash
+}
+
+fn hash_word(word: &[u8]) -> u32 {
+    let mut hash_word = 0;
+    for byte in word {
+        hash_word += *byte as u32;
+    }
+    hash_word
+}
+
+fn rabin_hash_next(past_hash: u32, hash_start_word: u32, hash_next_word: u32) -> u32 {
+    let x = 43;
+    let q = (1 << 31) - 1;
+    let hash_next = ((past_hash - hash_start_word * x.pow(COUNT_WORDS - 1)) * x + hash_next_word) % q;
+    hash_next
+}
+
+
+
+
+
+
+
+
+
+
+
