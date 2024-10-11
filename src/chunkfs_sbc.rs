@@ -1,7 +1,7 @@
 use crate::graph::Graph;
 use crate::levenshtein_functions::Action::{Add, Del, Rep};
 use crate::levenshtein_functions::{levenshtein_distance, Action};
-use crate::{hash, SBCHash};
+use crate::{SBCHash};
 use crate::{hash_functions, levenshtein_functions, ChunkType, SBCMap};
 use chunkfs::{ChunkHash, Data, DataContainer, Database, Scrub, ScrubMeasurements};
 use std::collections::{HashMap, HashSet};
@@ -248,19 +248,20 @@ fn set_for_chunk(data: &[u8]) -> HashSet<u32> {
         if index_word + size_block > data.len() {
             break
         }
-        rabin_hash = rabin_hash_next(rabin_hash,
-                                     hash_word(&data[index_word..index_word + WORD_LEN]),
-                                     hash_word(&data[index_word + size_block..std::cmp::min(index_word + size_block + WORD_LEN, data.len())]));
+        rabin_hash = rabin_hash_next(
+            rabin_hash,
+            hash_word(&data[index_word..index_word + WORD_LEN]),
+            hash_word(&data[index_word + size_block..std::cmp::min(index_word + size_block + WORD_LEN, data.len())]));
     }
     set_blocks
 }
 
 fn rabin_hash_simple(data: &[u8]) -> u32{
     let mut rabin_hash = 0;
-    let x = 43;
+    let x  = 43u32;
     let q = (1 << 31) - 1;
     for i in (0..data.len()).step_by(WORD_LEN) {
-        rabin_hash += hash_word(&data[i..i+WORD_LEN]) * x.pow(COUNT_WORDS - i / WORD_LEN) % q;
+        rabin_hash += hash_word(&data[i..i+WORD_LEN]) * x.pow((COUNT_WORDS - i / WORD_LEN) as u32) % q;
     }
     rabin_hash
 }
@@ -274,9 +275,9 @@ fn hash_word(word: &[u8]) -> u32 {
 }
 
 fn rabin_hash_next(past_hash: u32, hash_start_word: u32, hash_next_word: u32) -> u32 {
-    let x = 43;
+    let x = 43u32;
     let q = (1 << 31) - 1;
-    let hash_next = ((past_hash - hash_start_word * x.pow(COUNT_WORDS - 1)) * x + hash_next_word) % q;
+    let hash_next = ((past_hash - hash_start_word * x.pow(COUNT_WORDS as u32 - 1)) * x + hash_next_word) % q;
     hash_next
 }
 
