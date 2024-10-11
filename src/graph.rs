@@ -8,9 +8,7 @@ pub struct Vertex {
 
 impl Vertex {
     pub fn new(key: u32) -> Vertex {
-        Vertex {
-            parent: key,
-        }
+        Vertex { parent: key }
     }
 }
 

@@ -3,6 +3,7 @@ pub use hash_functions::hash;
 use std::collections::HashMap;
 
 mod chunkfs_sbc;
+mod clusterer;
 mod graph;
 mod hash_functions;
 mod levenshtein_functions;
