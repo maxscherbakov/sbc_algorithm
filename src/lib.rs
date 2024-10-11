@@ -1,10 +1,10 @@
 pub use chunkfs_sbc::SBCScrubber;
-pub use hash_function::hash;
+pub use hash_functions::hash;
 use std::collections::HashMap;
 
 mod chunkfs_sbc;
 mod graph;
-mod hash_function;
+mod hash_functions;
 mod levenshtein_functions;
 
 #[derive(Hash, PartialEq, Eq, Clone, Default)]
