@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-const MAX_WEIGHT_EDGE: u32 = 1 << 15;
+const MAX_WEIGHT_EDGE: u32 = 1 << 5;
 
-pub struct Vertex {
+struct Vertex {
     parent: u32,
 }
 
@@ -12,8 +12,8 @@ impl Vertex {
     }
 }
 
-pub struct Graph {
-    pub(crate) vertices: HashMap<u32, Vertex>,
+pub(crate) struct Graph {
+    vertices: HashMap<u32, Vertex>,
 }
 
 impl Graph {
@@ -39,12 +39,11 @@ impl Graph {
             ..=hash + std::cmp::min(u32::MAX - hash, MAX_WEIGHT_EDGE)
         {
             if self.vertices.contains_key(&other_hash) {
-                let dist = u32::abs_diff(other_hash, hash);
-                if dist < min_dist {
+                let other_parent_hash = self.find_set(other_hash);
+                let dist = u32::abs_diff(other_parent_hash, hash);
+                if dist < min_dist && dist <= MAX_WEIGHT_EDGE {
                     min_dist = dist;
-                    parent_hash = self.find_set(other_hash);
-                } else {
-                    break;
+                    parent_hash = other_parent_hash;
                 }
             }
         }
