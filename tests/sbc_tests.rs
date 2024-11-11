@@ -18,12 +18,11 @@ mod test {
         let mut handle = fs
             .create_file("file".to_string(), SuperChunker::new(), true)
             .unwrap();
-        let data = generate_data(4);
+        let data = generate_data(8);
         fs.write_to_file(&mut handle, &data).unwrap();
         fs.close_file(handle).unwrap();
 
-        let res = fs.scrub().unwrap();
-        println!("{res:?}");
+        let _res = fs.scrub().unwrap();
 
         let mut handle = fs.open_file("file", SuperChunker::new()).unwrap();
         let read = fs.read_file_complete(&mut handle).unwrap();
