@@ -8,6 +8,15 @@ use sbc_algorithm::{SBCMap, SBCScrubber};
 use std::collections::HashMap;
 use std::io;
 
+#[allow(dead_code)]
+const MB: usize = 1024 * 1024;
+
+#[allow(dead_code)]
+fn generate_data(mb_size: usize) -> Vec<u8> {
+    let bytes = mb_size * MB;
+    (0..bytes).map(|_| rand::random::<u8>()).collect()
+}
+
 fn main() -> io::Result<()> {
     let mut fs = FileSystem::new(
         HashMap::default(),
@@ -16,22 +25,17 @@ fn main() -> io::Result<()> {
         Sha256Hasher::default(),
     );
     let mut handle = fs.create_file("file".to_string(), SuperChunker::new(), true)?;
-    let data = generate_data(4);
+    let data = std::fs::read("runner/files/emails_test.csv")?;
+    println!("data was read");
     fs.write_to_file(&mut handle, &data)?;
     fs.close_file(handle)?;
+    println!("CDChunking complete");
 
     let res = fs.scrub().unwrap();
-    println!("{res:?}");
+    println!("Scrubber results: {res:?}");
 
     let mut handle = fs.open_file("file", SuperChunker::new())?;
     let read = fs.read_file_complete(&mut handle)?;
     assert_eq!(read.len(), data.len());
     Ok(())
-}
-
-const MB: usize = 1024 * 1024;
-
-fn generate_data(mb_size: usize) -> Vec<u8> {
-    let bytes = mb_size * MB;
-    (0..bytes).map(|_| rand::random::<u8>()).collect()
 }
