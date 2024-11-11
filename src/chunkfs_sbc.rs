@@ -9,8 +9,6 @@ use std::collections::HashMap;
 use std::io;
 use std::time::Instant;
 
-const MAX_COUNT_CHUNKS_IN_PACK: usize = 1024;
-
 impl Database<SBCHash, Vec<u8>> for SBCMap {
     fn insert(&mut self, sbc_hash: SBCHash, chunk: Vec<u8>) -> io::Result<()> {
         self.sbc_hashmap.insert(sbc_hash, chunk);
@@ -22,27 +20,17 @@ impl Database<SBCHash, Vec<u8>> for SBCMap {
 
         let chunk = match sbc_hash.chunk_type {
             ChunkType::Simple {} => sbc_value.clone(),
-            ChunkType::Delta {} => {
+            ChunkType::Delta(_) => {
                 let mut buf = [0u8; 4];
                 buf.copy_from_slice(&sbc_value[..4]);
 
                 let parent_hash = u32::from_be_bytes(buf);
-                let mut data = if self.contains(&SBCHash {
-                    key: parent_hash,
-                    chunk_type: ChunkType::Delta,
-                }) {
-                    self.get(&SBCHash {
-                        key: parent_hash,
-                        chunk_type: ChunkType::Delta,
-                    })
-                    .unwrap()
-                } else {
-                    self.get(&SBCHash {
+                let mut data = self
+                    .get(&SBCHash {
                         key: parent_hash,
                         chunk_type: ChunkType::Simple,
                     })
-                    .unwrap()
-                };
+                    .unwrap();
 
                 let mut byte_index = 4;
                 while byte_index < sbc_value.len() {
@@ -108,11 +96,12 @@ where
         let time_start = Instant::now();
         let mut processed_data = 0;
         let mut data_left = 0;
-        let count_chunks = database.into_iter().count();
+        let mut cdc_data = 0;
         let mut clusters: HashMap<u32, Vec<(u32, &mut DataContainer<SBCHash>)>> = HashMap::new();
-        for (chunk_index, (_, data_container)) in database.into_iter().enumerate() {
+        for (_, data_container) in database.into_iter() {
             match data_container.extract() {
                 Data::Chunk(data) => {
+                    cdc_data += data.len();
                     let sbc_hash = hash_functions::hash(data.as_slice());
                     let parent_hash = self.graph.add_vertex(sbc_hash);
                     let cluster = clusters.entry(parent_hash).or_default();
@@ -120,15 +109,16 @@ where
                 }
                 Data::TargetChunk(_) => {}
             }
-            if chunk_index % MAX_COUNT_CHUNKS_IN_PACK == 0 || chunk_index == count_chunks - 1 {
-                let (clusters_data_left, clusters_processed_data) =
-                    clusterer::encode_clusters(&mut clusters, target_map);
-                data_left += clusters_data_left;
-                processed_data += clusters_processed_data;
-                clusters = HashMap::new();
-            }
         }
+        let time_hashing = time_start.elapsed();
+        println!("time for hashing: {time_hashing:?}");
+        let (clusters_data_left, clusters_processed_data) =
+            clusterer::encode_clusters(&mut clusters, target_map);
+        println!("encode clusters");
+        data_left += clusters_data_left;
+        processed_data += clusters_processed_data;
         let running_time = time_start.elapsed();
+        println!("data size after cdc: {cdc_data}");
         Ok(ScrubMeasurements {
             processed_data,
             running_time,
