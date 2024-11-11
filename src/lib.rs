@@ -10,7 +10,7 @@ mod levenshtein_functions;
 
 #[derive(Hash, PartialEq, Eq, Clone, Default)]
 enum ChunkType {
-    Delta,
+    Delta(u8),
     #[default]
     Simple,
 }

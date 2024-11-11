@@ -45,12 +45,21 @@ fn encode_simple_chunk(
     data: &[u8],
     hash: u32,
 ) -> (usize, SBCHash) {
-    let sbc_hash = SBCHash {
-        key: find_empty_cell(target_map, hash),
+    let mut sbc_hash = SBCHash {
+        key: hash,
         chunk_type: ChunkType::Simple,
     };
-    let _ = target_map.insert(sbc_hash.clone(), data.to_vec());
-    (data.len(), sbc_hash)
+    if !target_map.contains(&sbc_hash){
+        sbc_hash.key = find_empty_cell(target_map, hash);
+        let _ = target_map.insert(sbc_hash.clone(), data.to_vec());
+        (data.len(), sbc_hash)
+    } else if target_map.get(&sbc_hash).unwrap().as_slice() == data {
+        (0, sbc_hash)
+    } else {
+        sbc_hash.key = find_empty_cell(target_map, hash);
+        let _ = target_map.insert(sbc_hash.clone(), data.to_vec());
+        (data.len(), sbc_hash)
+    }
 }
 
 fn encode_delta_chunk(
@@ -58,6 +67,7 @@ fn encode_delta_chunk(
     data: &[u8],
     hash: u32,
     parent_data: &[u8],
+    parent_hash: u32,
 ) -> (usize, SBCHash) {
     let number_delta_chunk = count_delta_chunks_with_hash(target_map, hash);
     let sbc_hash = SBCHash {
@@ -65,7 +75,7 @@ fn encode_delta_chunk(
         chunk_type: ChunkType::Delta(number_delta_chunk),
     };
     let mut delta_chunk = Vec::new();
-    for byte in hash.to_be_bytes() {
+    for byte in parent_hash.to_be_bytes() {
         delta_chunk.push(byte);
     }
     for delta_action in levenshtein_functions::encode(data, parent_data) {
@@ -106,8 +116,13 @@ fn encode_cluster(
                         hash,
                         parent_hash
                     );
-                    let (processed, sbc_hash) =
-                        encode_delta_chunk(target_map, data, *hash, parent_data.as_slice());
+                    let (processed, sbc_hash) = encode_delta_chunk(
+                        target_map,
+                        data,
+                        *hash,
+                        parent_data.as_slice(),
+                        parent_hash,
+                    );
                     processed_data += processed;
                     target_hash = sbc_hash;
                 }
@@ -135,11 +150,11 @@ fn find_parent_chunk_in_cluster(
         match data_container_1.extract() {
             Data::Chunk(data_1) => {
                 for (hash_2, data_container_2) in cluster.iter() {
-                    if *hash_1 == *hash_2 {
-                        continue;
-                    }
                     match data_container_2.extract() {
                         Data::Chunk(data_2) => {
+                            if *hash_1 == *hash_2 && data_1 == data_2 {
+                                continue;
+                            }
                             if data_1.len().abs_diff(data_2.len()) > 4000
                                 || data_1.len() * data_2.len() > 256 * (1 << 20)
                             {
