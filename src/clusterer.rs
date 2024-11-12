@@ -146,9 +146,9 @@ fn find_parent_chunk_in_cluster(
     };
 
     for (hash_1, data_container_1) in cluster.iter() {
-        let mut sum_dist_for_chunk = 0u32;
         match data_container_1.extract() {
             Data::Chunk(data_1) => {
+                let mut sum_dist_for_chunk = data_1.len() as u32;
                 for (hash_2, data_container_2) in cluster.iter() {
                     match data_container_2.extract() {
                         Data::Chunk(data_2) => {
@@ -161,6 +161,7 @@ fn find_parent_chunk_in_cluster(
                                 let not_delta_encode_hashes =
                                     not_delta_encoded.entry(*hash_1).or_default();
                                 not_delta_encode_hashes.insert(*hash_2);
+                                sum_dist_for_chunk += data_2.len() as u32;
                             } else {
                                 let levenshtein_dist = levenshtein_distance(
                                     (*data_1).as_slice(),
@@ -170,6 +171,7 @@ fn find_parent_chunk_in_cluster(
                                     let not_delta_encode_hashes =
                                         not_delta_encoded.entry(*hash_1).or_default();
                                     not_delta_encode_hashes.insert(*hash_2);
+                                    sum_dist_for_chunk += data_2.len() as u32;
                                 } else {
                                     sum_dist_for_chunk += levenshtein_dist;
                                 }

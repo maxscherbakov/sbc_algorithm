@@ -1,7 +1,7 @@
 extern crate chunkfs;
 extern crate sbc_algorithm;
 
-use chunkfs::chunkers::SuperChunker;
+use chunkfs::chunkers::{SuperChunker, RabinChunker};
 use chunkfs::hashers::Sha256Hasher;
 use chunkfs::FileSystem;
 use sbc_algorithm::{SBCMap, SBCScrubber};
