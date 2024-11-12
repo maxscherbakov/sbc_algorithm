@@ -18,7 +18,7 @@ fn generate_data(mb_size: usize) -> Vec<u8> {
 }
 
 fn main() -> io::Result<()> {
-    let mut fs = FileSystem::new(
+    let mut fs = FileSystem::new_with_scrubber(
         HashMap::default(),
         Box::new(SBCMap::new()),
         Box::new(SBCScrubber::new()),
