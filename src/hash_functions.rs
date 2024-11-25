@@ -120,8 +120,6 @@ pub fn hash(data: &[u8]) -> u32 {
     let c_hash = processing_of_c_spectrum(bytes_vec.as_slice());
     let f_hash = processing_of_f_spectrum(bytes_vec.as_slice());
     let p_hash = processing_of_p_spectrum(pairs_vec.as_slice());
-
-    println!("{p_hash}");
     let hash = c_hash ^ f_hash ^ p_hash;
 
     processing_of_pair(pairs_vec[0].0);

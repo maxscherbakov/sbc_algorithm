@@ -8,7 +8,7 @@ mod graph;
 mod hash_functions;
 mod levenshtein_functions;
 
-#[derive(Hash, PartialEq, Eq, Clone, Default)]
+#[derive(Hash, PartialEq, Eq, Clone, Default, Debug)]
 enum ChunkType {
     Delta(u8),
     #[default]
