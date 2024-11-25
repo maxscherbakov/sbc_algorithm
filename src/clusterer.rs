@@ -45,21 +45,13 @@ fn encode_simple_chunk(
     data: &[u8],
     hash: u32,
 ) -> (usize, SBCHash) {
-    let mut sbc_hash = SBCHash {
-        key: hash,
+    let sbc_hash = SBCHash {
+        key: find_empty_cell(target_map, hash),
         chunk_type: ChunkType::Simple,
     };
-    if !target_map.contains(&sbc_hash){
-        sbc_hash.key = find_empty_cell(target_map, hash);
-        let _ = target_map.insert(sbc_hash.clone(), data.to_vec());
-        (data.len(), sbc_hash)
-    } else if target_map.get(&sbc_hash).unwrap().as_slice() == data {
-        (0, sbc_hash)
-    } else {
-        sbc_hash.key = find_empty_cell(target_map, hash);
-        let _ = target_map.insert(sbc_hash.clone(), data.to_vec());
-        (data.len(), sbc_hash)
-    }
+
+    let _ = target_map.insert(sbc_hash.clone(), data.to_vec());
+    (data.len(), sbc_hash)
 }
 
 fn encode_delta_chunk(
@@ -92,17 +84,29 @@ fn encode_cluster(
     target_map: &mut Box<dyn Database<SBCHash, Vec<u8>>>,
     cluster: &mut [(u32, &mut DataContainer<SBCHash>)],
 ) -> (usize, usize) {
-    let (parent_hash, parent_data, not_delta_encoded) = find_parent_chunk_in_cluster(cluster);
     let mut data_left = 0;
     let mut processed_data = 0;
-    for (hash, data_container) in cluster.iter_mut() {
+    let (parent_id, not_delta_encoded) = find_parent_chunk_in_cluster(cluster);
+    let (parent_hash, parent_data_container) = &mut cluster[parent_id];
+    let parent_data = match parent_data_container.extract() {
+        Data::Chunk(data) => {data.clone()}
+        Data::TargetChunk(_) => {panic!()}
+    };
+    let (left, parent_sbc_hash) = encode_simple_chunk(target_map, parent_data.as_slice(), *parent_hash);
+    let parent_hash = parent_sbc_hash.key;
+    data_left += left;
+    parent_data_container.make_target(vec![parent_sbc_hash]);
+
+    for (chunk_id, (hash, data_container)) in cluster.iter_mut().enumerate() {
+        if chunk_id == parent_id {
+            continue
+        }
         let mut target_hash = SBCHash::default();
         match data_container.extract() {
             Data::Chunk(data) => {
-                if *hash == parent_hash
-                    || match not_delta_encoded.clone() {
+                if match not_delta_encoded.clone() {
                         None => false,
-                        Some(set) => set.contains(hash),
+                        Some(set) => set.contains(&chunk_id),
                     }
                 {
                     let (left, sbc_hash) = encode_simple_chunk(target_map, data, *hash);
@@ -136,31 +140,28 @@ fn encode_cluster(
 
 fn find_parent_chunk_in_cluster(
     cluster: &[(u32, &mut DataContainer<SBCHash>)],
-) -> (u32, Vec<u8>, Option<HashSet<u32>>) {
+) -> (usize, Option<HashSet<usize>>) {
+    if cluster.len() == 1 {
+        return (0, None)
+    }
     let mut min_sum_dist = u32::MAX;
-    let mut not_delta_encoded: HashMap<u32, HashSet<u32>> = HashMap::new();
-    let mut parent_hash = cluster[0].0;
-    let mut parent_data = match cluster[0].1.extract() {
-        Data::Chunk(data) => data,
-        Data::TargetChunk(_) => panic!(),
-    };
+    let mut not_delta_encoded: HashMap<usize, HashSet<usize>> = HashMap::new();
+    let mut parent_id = 0;
 
-    for (hash_1, data_container_1) in cluster.iter() {
+    for (chunk_id_1, (_, data_container_1)) in cluster.iter().enumerate() {
         match data_container_1.extract() {
             Data::Chunk(data_1) => {
                 let mut sum_dist_for_chunk = data_1.len() as u32;
-                for (hash_2, data_container_2) in cluster.iter() {
+                for (chunk_id_2, (_, data_container_2)) in cluster.iter().enumerate() {
                     match data_container_2.extract() {
                         Data::Chunk(data_2) => {
-                            if *hash_1 == *hash_2 && data_1 == data_2 {
+                            if chunk_id_1 == chunk_id_2 {
                                 continue;
                             }
-                            if data_1.len().abs_diff(data_2.len()) > 4000
-                                || data_1.len() * data_2.len() > 256 * (1 << 20)
-                            {
+                            if data_1.len().abs_diff(data_2.len()) > 4000 {
                                 let not_delta_encode_hashes =
-                                    not_delta_encoded.entry(*hash_1).or_default();
-                                not_delta_encode_hashes.insert(*hash_2);
+                                    not_delta_encoded.entry(chunk_id_1).or_default();
+                                not_delta_encode_hashes.insert(chunk_id_2);
                                 sum_dist_for_chunk += data_2.len() as u32;
                             } else {
                                 let levenshtein_dist = levenshtein_distance(
@@ -169,8 +170,8 @@ fn find_parent_chunk_in_cluster(
                                 );
                                 if levenshtein_dist * 4 >= data_1.len() as u32 {
                                     let not_delta_encode_hashes =
-                                        not_delta_encoded.entry(*hash_1).or_default();
-                                    not_delta_encode_hashes.insert(*hash_2);
+                                        not_delta_encoded.entry(chunk_id_1).or_default();
+                                    not_delta_encode_hashes.insert(chunk_id_2);
                                     sum_dist_for_chunk += data_2.len() as u32;
                                 } else {
                                     sum_dist_for_chunk += levenshtein_dist;
@@ -182,17 +183,15 @@ fn find_parent_chunk_in_cluster(
                 }
                 if sum_dist_for_chunk < min_sum_dist {
                     min_sum_dist = sum_dist_for_chunk;
-                    parent_hash = *hash_1;
-                    parent_data = data_1;
+                    parent_id = chunk_id_1;
                 }
             }
             Data::TargetChunk(_) => {}
         }
     }
     (
-        parent_hash,
-        parent_data.clone(),
-        not_delta_encoded.get(&parent_hash).cloned(),
+        parent_id,
+        not_delta_encoded.get(&parent_id).cloned(),
     )
 }
 

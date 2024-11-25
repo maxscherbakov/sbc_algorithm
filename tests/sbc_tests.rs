@@ -9,14 +9,14 @@ mod test {
     use std::collections::HashMap;
     #[test]
     fn test_data_recovery() {
-        let mut fs = FileSystem::new(
+        let mut fs = FileSystem::new_with_scrubber(
             HashMap::default(),
             Box::new(SBCMap::new()),
             Box::new(SBCScrubber::new()),
             Sha256Hasher::default(),
         );
         let mut handle = fs
-            .create_file("file".to_string(), SuperChunker::new(), true)
+            .create_file("file".to_string(), SuperChunker::default(), true)
             .unwrap();
         let data = generate_data(8);
         fs.write_to_file(&mut handle, &data).unwrap();
@@ -24,7 +24,7 @@ mod test {
 
         let _res = fs.scrub().unwrap();
 
-        let mut handle = fs.open_file("file", SuperChunker::new()).unwrap();
+        let mut handle = fs.open_file("file", SuperChunker::default()).unwrap();
         let read = fs.read_file_complete(&mut handle).unwrap();
         assert_eq!(read, data);
     }

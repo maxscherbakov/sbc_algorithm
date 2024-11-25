@@ -5,15 +5,16 @@ const BLOCKS_IN_C_SPECTRUM_COUNT: usize = 8;
 const MIN_SPACE_VALUE: u32 = 1;
 const BITS_IN_F_SPECTRUM_BLOCKS_COUNT: u32 = 3;
 const BLOCKS_IN_F_SPECTRUM_COUNT: usize = 16;
-const SHIFT_FOR_PAIR: u8 = 4;
+const SHIFT_FOR_PAIR: u8 = 3;
 const BLOCKS_FOR_P_SPECTRUM_INDEXES: Range<usize> = 5..9;
+const MIN_FREQUENCY_FOR_BYTE: u32 = 15;
 
 fn processing_of_c_spectrum(c_f_spectrum: &[(&u8, &u32)]) -> u32 {
     let mut spaces_in_c_spectrum = Vec::new();
-    for byte_index in 1..c_f_spectrum.len() {
+    for byte_index in 0..c_f_spectrum.len() - 1 {
         let frequency_delta =
-            (c_f_spectrum[byte_index - 1].1 - c_f_spectrum[byte_index].1) * byte_index as u32;
-        if frequency_delta >= MIN_SPACE_VALUE {
+            (c_f_spectrum[byte_index].1 - c_f_spectrum[byte_index + 1].1) * (byte_index + 1) as u32;
+        if frequency_delta >= MIN_SPACE_VALUE && *c_f_spectrum[byte_index + 1].1 >= MIN_FREQUENCY_FOR_BYTE {
             spaces_in_c_spectrum.push((byte_index, frequency_delta));
         }
     }
@@ -31,8 +32,8 @@ fn processing_of_c_spectrum(c_f_spectrum: &[(&u8, &u32)]) -> u32 {
     let mut hash: u32 = 0;
 
     let mut start_block = 0;
-    for (block_number, block) in spaces_in_c_spectrum_indexes.iter().enumerate() {
-        let end_block = *block;
+    for (block_number, id_end_block) in spaces_in_c_spectrum_indexes.iter().enumerate() {
+        let end_block = *id_end_block;
         let block = &c_f_spectrum[start_block..end_block];
         let mut block_hash = 0;
         for byte_frequency in block {
@@ -79,7 +80,7 @@ fn processing_of_pair(pair: &(u8, u8)) -> u32 {
         + pair.0 / (1 << (8 - SHIFT_FOR_PAIR));
     let byte2 =
         ((pair.1 % (1 << SHIFT_FOR_PAIR)) << (8 - SHIFT_FOR_PAIR)) + pair.1 / (1 << SHIFT_FOR_PAIR);
-    (byte1 as u32) << (8 - SHIFT_FOR_PAIR as u32) ^ (byte2 as u32)
+    ((byte1 as u32) << 4) ^ (byte2 as u32)
 }
 
 fn processing_of_p_spectrum(p_spectrum: &[(&(u8, u8), &u32)]) -> u32 {
@@ -88,7 +89,7 @@ fn processing_of_p_spectrum(p_spectrum: &[(&(u8, u8), &u32)]) -> u32 {
         if block_index >= p_spectrum.len() {
             break;
         }
-        hash ^= processing_of_pair(p_spectrum[block_index].0) << (16 + SHIFT_FOR_PAIR);
+        hash ^= processing_of_pair(p_spectrum[block_index].0) << 20;
     }
 
     hash
@@ -119,8 +120,54 @@ pub fn hash(data: &[u8]) -> u32 {
     let c_hash = processing_of_c_spectrum(bytes_vec.as_slice());
     let f_hash = processing_of_f_spectrum(bytes_vec.as_slice());
     let p_hash = processing_of_p_spectrum(pairs_vec.as_slice());
+
+    println!("{p_hash}");
     let hash = c_hash ^ f_hash ^ p_hash;
 
     processing_of_pair(pairs_vec[0].0);
     hash
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn test_processing_of_pair() {
+        let a = 175u8;
+        let b = 113u8;
+        let processed_pair = processing_of_pair(&(a, b));
+        let name = &format!("{:b}", processed_pair);
+        assert_eq!(name, "11111111110")
+    }
+    #[test]
+    fn test_processing_of_p_spectrum_with_one_pair() {
+        let mut p_spectrum = Vec::new();
+        for _ in 0..6 {
+            p_spectrum.push((&(175u8, 113u8), &0u32));
+        }
+        let processed_p_spectrum = processing_of_p_spectrum(p_spectrum.as_slice());
+        let name = &format!("{:b}", processed_p_spectrum);
+        assert_eq!(name, "1111111111000000000000000000000")
+    }
+
+    #[test]
+    fn test_processing_of_p_spectrum_with_two_eq_pairs() {
+        let mut p_spectrum = Vec::new();
+        for _ in 0..7 {
+            p_spectrum.push((&(175u8, 113u8), &0u32));
+        }
+        let processed_p_spectrum = processing_of_p_spectrum(p_spectrum.as_slice());
+        assert_eq!(processed_p_spectrum, 0)
+    }
+    #[test]
+    fn test_processing_of_p_spectrum() {
+        let mut p_spectrum = Vec::new();
+        for _ in 0..6 {
+            p_spectrum.push((&(175u8, 113u8), &0u32));
+        }
+        p_spectrum.push((&(7u8, 7u8), &0u32));
+        let processed_p_spectrum = processing_of_p_spectrum(p_spectrum.as_slice());
+        let name = &format!("{:b}", processed_p_spectrum);
+        assert_eq!(name, "1001001111000000000000000000000")
+    }
 }
