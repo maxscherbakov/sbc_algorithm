@@ -6,5 +6,5 @@ edition = "2021"
 
 [dependencies]
 sbc_algorithm = { path = ".." }
-chunkfs = { git = "https://github.com/Piletskii-Oleg/chunkfs.git", branch = "SBC-FBC-support",  features = ["hashers", "chunkers"] }
+chunkfs = { git = "https://github.com/Piletskii-Oleg/chunkfs.git", branch = "master",  features = ["hashers", "chunkers"] }
 rand = "0.8.5"

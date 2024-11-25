@@ -1,10 +1,10 @@
 use crate::levenshtein_functions::levenshtein_distance;
-use crate::{levenshtein_functions, ChunkType, SBCHash};
+use crate::{levenshtein_functions, ChunkType, SBCHash, SBCMap};
 use chunkfs::{Data, DataContainer, Database};
 use std::collections::{HashMap, HashSet};
 
 fn count_delta_chunks_with_hash(
-    target_map: &mut Box<dyn Database<SBCHash, Vec<u8>>>,
+    target_map: &mut SBCMap,
     hash: u32,
 ) -> u8 {
     let mut count = 0;
@@ -17,7 +17,7 @@ fn count_delta_chunks_with_hash(
     count
 }
 
-fn find_empty_cell(target_map: &mut Box<dyn Database<SBCHash, Vec<u8>>>, hash: u32) -> u32 {
+fn find_empty_cell(target_map: &SBCMap, hash: u32) -> u32 {
     let mut left = hash;
     let mut right = hash + 1;
     loop {
@@ -41,7 +41,7 @@ fn find_empty_cell(target_map: &mut Box<dyn Database<SBCHash, Vec<u8>>>, hash: u
 }
 
 fn encode_simple_chunk(
-    target_map: &mut Box<dyn Database<SBCHash, Vec<u8>>>,
+    target_map: &mut SBCMap,
     data: &[u8],
     hash: u32,
 ) -> (usize, SBCHash) {
@@ -55,7 +55,7 @@ fn encode_simple_chunk(
 }
 
 fn encode_delta_chunk(
-    target_map: &mut Box<dyn Database<SBCHash, Vec<u8>>>,
+    target_map: &mut SBCMap,
     data: &[u8],
     hash: u32,
     parent_data: &[u8],
@@ -81,7 +81,7 @@ fn encode_delta_chunk(
 }
 
 fn encode_cluster(
-    target_map: &mut Box<dyn Database<SBCHash, Vec<u8>>>,
+    target_map: &mut SBCMap,
     cluster: &mut [(u32, &mut DataContainer<SBCHash>)],
 ) -> (usize, usize) {
     let mut data_left = 0;
@@ -197,7 +197,7 @@ fn find_parent_chunk_in_cluster(
 
 pub(crate) fn encode_clusters(
     clusters: &mut HashMap<u32, Vec<(u32, &mut DataContainer<SBCHash>)>>,
-    target_map: &mut Box<dyn Database<SBCHash, Vec<u8>>>,
+    target_map: &mut SBCMap,
 ) -> (usize, usize) {
     let mut data_left = 0;
     let mut processed_data = 0;

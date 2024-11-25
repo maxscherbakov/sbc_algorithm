@@ -4,7 +4,7 @@ use crate::levenshtein_functions::{
     Action::{Add, Del, Rep},
 };
 use crate::{clusterer, hash_functions, ChunkType, SBCHash, SBCMap};
-use chunkfs::{ChunkHash, Data, DataContainer, Database, Scrub, ScrubMeasurements};
+use chunkfs::{ChunkHash, Data, DataContainer, Database, Scrub, ScrubMeasurements, IterableDatabase};
 use std::collections::HashMap;
 use std::io;
 use std::time::Instant;
@@ -83,15 +83,14 @@ impl Default for SBCScrubber {
     }
 }
 
-impl<Hash: ChunkHash, B> Scrub<Hash, B, SBCHash> for SBCScrubber
+impl<Hash: ChunkHash, B> Scrub<Hash, B, SBCHash, SBCMap> for SBCScrubber
 where
-    B: Database<Hash, DataContainer<SBCHash>>,
-    for<'a> &'a mut B: IntoIterator<Item = (&'a Hash, &'a mut DataContainer<SBCHash>)>,
+    B: IterableDatabase<Hash, DataContainer<SBCHash>>,
 {
     fn scrub<'a>(
         &mut self,
         database: &mut B,
-        target_map: &mut Box<dyn Database<SBCHash, Vec<u8>>>,
+        target_map: &mut SBCMap,
     ) -> io::Result<ScrubMeasurements>
     where
         Hash: 'a,
@@ -100,7 +99,7 @@ where
         let mut processed_data = 0;
         let mut data_left = 0;
         let mut clusters: HashMap<u32, Vec<(u32, &mut DataContainer<SBCHash>)>> = HashMap::new();
-        for (_, data_container) in database.into_iter() {
+        for (_, data_container) in database.iterator_mut() {
             match data_container.extract() {
                 Data::Chunk(data) => {
                     let sbc_hash = hash_functions::hash(data.as_slice());

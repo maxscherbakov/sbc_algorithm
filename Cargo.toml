@@ -7,8 +7,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-chunkfs = { git = "https://github.com/Piletskii-Oleg/chunkfs.git", branch = "SBC-FBC-support" }
+chunkfs = { git = "https://github.com/Piletskii-Oleg/chunkfs.git", branch = "master" }
 
 [dev-dependencies]
 rand = "0.8.5"
-chunkfs = { git = "https://github.com/Piletskii-Oleg/chunkfs.git", branch = "SBC-FBC-support",  features = ["hashers", "chunkers"] }
+chunkfs = { git = "https://github.com/Piletskii-Oleg/chunkfs.git", branch = "master",  features = ["hashers", "chunkers"] }
