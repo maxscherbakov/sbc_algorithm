@@ -11,7 +11,7 @@ mod test {
     fn test_data_recovery() {
         let mut fs = FileSystem::new_with_scrubber(
             HashMap::default(),
-            Box::new(SBCMap::new()),
+            SBCMap::new(),
             Box::new(SBCScrubber::new()),
             Sha256Hasher::default(),
         );

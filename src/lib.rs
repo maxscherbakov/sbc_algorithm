@@ -1,5 +1,5 @@
 pub use chunkfs_sbc::SBCScrubber;
-pub use hash_functions::hash;
+pub use hash_functions::sbc_hashing;
 use std::collections::HashMap;
 
 mod chunkfs_sbc;
@@ -10,7 +10,7 @@ mod levenshtein_functions;
 
 #[derive(Hash, PartialEq, Eq, Clone, Default, Debug)]
 enum ChunkType {
-    Delta(u8),
+    Delta(u16),
     #[default]
     Simple,
 }

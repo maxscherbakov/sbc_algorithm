@@ -4,7 +4,9 @@ use crate::levenshtein_functions::{
     Action::{Add, Del, Rep},
 };
 use crate::{clusterer, hash_functions, ChunkType, SBCHash, SBCMap};
-use chunkfs::{ChunkHash, Data, DataContainer, Database, Scrub, ScrubMeasurements, IterableDatabase};
+use chunkfs::{
+    ChunkHash, Data, DataContainer, Database, IterableDatabase, Scrub, ScrubMeasurements,
+};
 use std::collections::HashMap;
 use std::io;
 use std::time::Instant;
@@ -17,8 +19,10 @@ impl Database<SBCHash, Vec<u8>> for SBCMap {
 
     fn get(&self, sbc_hash: &SBCHash) -> io::Result<Vec<u8>> {
         let sbc_value = match self.sbc_hashmap.get(sbc_hash) {
-            None => {panic!("{}, {:?}", sbc_hash.key, sbc_hash.chunk_type)}
-            Some(data) => {data}
+            None => {
+                panic!("{}, {:?}", sbc_hash.key, sbc_hash.chunk_type)
+            }
+            Some(data) => data,
         };
 
         let chunk = match sbc_hash.chunk_type {
@@ -102,7 +106,7 @@ where
         for (_, data_container) in database.iterator_mut() {
             match data_container.extract() {
                 Data::Chunk(data) => {
-                    let sbc_hash = hash_functions::hash(data.as_slice());
+                    let sbc_hash = hash_functions::sbc_hashing(data.as_slice());
                     let parent_hash = self.graph.add_vertex(sbc_hash);
                     let cluster = clusters.entry(parent_hash).or_default();
                     cluster.push((sbc_hash, data_container));

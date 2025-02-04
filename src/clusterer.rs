@@ -3,10 +3,7 @@ use crate::{levenshtein_functions, ChunkType, SBCHash, SBCMap};
 use chunkfs::{Data, DataContainer, Database};
 use std::collections::{HashMap, HashSet};
 
-fn count_delta_chunks_with_hash(
-    target_map: &mut SBCMap,
-    hash: u32,
-) -> u8 {
+fn count_delta_chunks_with_hash(target_map: &mut SBCMap, hash: u32) -> u16 {
     let mut count = 0;
     while target_map.contains(&SBCHash {
         key: hash,
@@ -40,11 +37,7 @@ fn find_empty_cell(target_map: &SBCMap, hash: u32) -> u32 {
     }
 }
 
-fn encode_simple_chunk(
-    target_map: &mut SBCMap,
-    data: &[u8],
-    hash: u32,
-) -> (usize, SBCHash) {
+fn encode_simple_chunk(target_map: &mut SBCMap, data: &[u8], hash: u32) -> (usize, SBCHash) {
     let sbc_hash = SBCHash {
         key: find_empty_cell(target_map, hash),
         chunk_type: ChunkType::Simple,
@@ -60,7 +53,7 @@ fn encode_delta_chunk(
     hash: u32,
     parent_data: &[u8],
     parent_hash: u32,
-) -> (usize, SBCHash) {
+) -> (usize, usize, SBCHash) {
     let number_delta_chunk = count_delta_chunks_with_hash(target_map, hash);
     let sbc_hash = SBCHash {
         key: hash,
@@ -70,14 +63,23 @@ fn encode_delta_chunk(
     for byte in parent_hash.to_be_bytes() {
         delta_chunk.push(byte);
     }
-    for delta_action in levenshtein_functions::encode(data, parent_data) {
-        for byte in delta_action.to_be_bytes() {
-            delta_chunk.push(byte);
+
+    match levenshtein_functions::encode(data, parent_data) {
+        None => {
+            let (data_left, sbc_hash) = encode_simple_chunk(target_map, data, hash);
+            (data_left, 0, sbc_hash)
+        }
+        Some(delta_code) => {
+            for delta_action in delta_code {
+                for byte in delta_action.to_be_bytes() {
+                    delta_chunk.push(byte);
+                }
+            }
+            let processed_data = delta_chunk.len();
+            let _ = target_map.insert(sbc_hash.clone(), delta_chunk);
+            (0, processed_data, sbc_hash)
         }
     }
-    let processed_data = delta_chunk.len();
-    let _ = target_map.insert(sbc_hash.clone(), delta_chunk);
-    (processed_data, sbc_hash)
 }
 
 fn encode_cluster(
@@ -86,28 +88,37 @@ fn encode_cluster(
 ) -> (usize, usize) {
     let mut data_left = 0;
     let mut processed_data = 0;
-    let (parent_id, not_delta_encoded) = find_parent_chunk_in_cluster(cluster);
+    let count_chunks_in_cluster = cluster.len();
+    let (parent_id, not_delta_encoded) = (0, Option::<HashSet<usize>>::None); //find_parent_chunk_in_cluster(cluster);
     let (parent_hash, parent_data_container) = &mut cluster[parent_id];
     let parent_data = match parent_data_container.extract() {
-        Data::Chunk(data) => {data.clone()}
-        Data::TargetChunk(_) => {panic!()}
+        Data::Chunk(data) => data.clone(),
+        Data::TargetChunk(_) => {
+            panic!()
+        }
     };
-    let (left, parent_sbc_hash) = encode_simple_chunk(target_map, parent_data.as_slice(), *parent_hash);
+
+    if count_chunks_in_cluster > 5 {
+        print!("parent hash for cluster: {} ", parent_hash.clone());
+        println!("count chunks in cluster {}", count_chunks_in_cluster);
+    }
+    let (left, parent_sbc_hash) =
+        encode_simple_chunk(target_map, parent_data.as_slice(), *parent_hash);
     let parent_hash = parent_sbc_hash.key;
     data_left += left;
     parent_data_container.make_target(vec![parent_sbc_hash]);
 
     for (chunk_id, (hash, data_container)) in cluster.iter_mut().enumerate() {
         if chunk_id == parent_id {
-            continue
+            continue;
         }
         let mut target_hash = SBCHash::default();
         match data_container.extract() {
             Data::Chunk(data) => {
                 if match not_delta_encoded.clone() {
-                        None => false,
-                        Some(set) => set.contains(&chunk_id),
-                    }
+                    None => false,
+                    Some(set) => set.contains(&chunk_id),
+                } || data.len().abs_diff(parent_data.len()) > 4000
                 {
                     let (left, sbc_hash) = encode_simple_chunk(target_map, data, *hash);
                     data_left += left;
@@ -120,13 +131,14 @@ fn encode_cluster(
                         hash,
                         parent_hash
                     );
-                    let (processed, sbc_hash) = encode_delta_chunk(
+                    let (left, processed, sbc_hash) = encode_delta_chunk(
                         target_map,
                         data,
                         *hash,
                         parent_data.as_slice(),
                         parent_hash,
                     );
+                    data_left += left;
                     processed_data += processed;
                     target_hash = sbc_hash;
                 }
@@ -138,11 +150,12 @@ fn encode_cluster(
     (data_left, processed_data)
 }
 
+#[allow(dead_code)]
 fn find_parent_chunk_in_cluster(
     cluster: &[(u32, &mut DataContainer<SBCHash>)],
 ) -> (usize, Option<HashSet<usize>>) {
     if cluster.len() == 1 {
-        return (0, None)
+        return (0, None);
     }
     let mut min_sum_dist = u32::MAX;
     let mut not_delta_encoded: HashMap<usize, HashSet<usize>> = HashMap::new();
@@ -189,10 +202,7 @@ fn find_parent_chunk_in_cluster(
             Data::TargetChunk(_) => {}
         }
     }
-    (
-        parent_id,
-        not_delta_encoded.get(&parent_id).cloned(),
-    )
+    (parent_id, not_delta_encoded.get(&parent_id).cloned())
 }
 
 pub(crate) fn encode_clusters(
@@ -207,4 +217,185 @@ pub(crate) fn encode_clusters(
         processed_data += data_analyse.1;
     }
     (data_left, processed_data)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn test_restore_similarity_chunk_1_byte_diff() {
+        let mut data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let data2 = data.clone();
+        if data[15] < 255 {
+            data[15] = 255;
+        } else {
+            data[15] = 0;
+        }
+        let mut sbc_map = SBCMap::new();
+
+        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map, data.as_slice(), 0);
+        let (_, _, sbc_hash_2) = encode_delta_chunk(
+            &mut sbc_map,
+            data2.as_slice(),
+            3,
+            data.as_slice(),
+            sbc_hash.key,
+        );
+
+        assert_eq!(sbc_map.get(&sbc_hash_2).unwrap(), data2)
+    }
+    #[test]
+    fn test_restore_similarity_chunk_2_neighbor_byte_diff() {
+        let mut data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let data2 = data.clone();
+        if data[15] < 255 {
+            data[15] = 255;
+        } else {
+            data[15] = 0;
+        }
+        if data[16] < 255 {
+            data[16] = 255;
+        } else {
+            data[16] = 0;
+        }
+        let mut sbc_map = SBCMap::new();
+
+        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map, data.as_slice(), 0);
+        let (_, _, sbc_hash_2) = encode_delta_chunk(
+            &mut sbc_map,
+            data2.as_slice(),
+            3,
+            data.as_slice(),
+            sbc_hash.key,
+        );
+
+        assert_eq!(sbc_map.get(&sbc_hash_2).unwrap(), data2)
+    }
+
+    #[test]
+    fn test_restore_similarity_chunk_2_byte_diff() {
+        let mut data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let data2 = data.clone();
+        if data[15] < 255 {
+            data[15] = 255;
+        } else {
+            data[15] = 0;
+        }
+        if data[106] < 255 {
+            data[106] = 255;
+        } else {
+            data[106] = 0;
+        }
+        let mut sbc_map = SBCMap::new();
+
+        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map, data.as_slice(), 0);
+        let (_, _, sbc_hash_2) = encode_delta_chunk(
+            &mut sbc_map,
+            data2.as_slice(),
+            3,
+            data.as_slice(),
+            sbc_hash.key,
+        );
+
+        assert_eq!(sbc_map.get(&sbc_hash_2).unwrap(), data2)
+    }
+
+    #[test]
+    fn test_restore_similarity_chunk_with_offset_left() {
+        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let data2 = data[15..].to_vec();
+        let mut sbc_map = SBCMap::new();
+
+        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map, data.as_slice(), 0);
+        let (_, _, sbc_hash_2) = encode_delta_chunk(
+            &mut sbc_map,
+            data2.as_slice(),
+            3,
+            data.as_slice(),
+            sbc_hash.key,
+        );
+
+        assert_eq!(sbc_map.get(&sbc_hash_2).unwrap(), data2)
+    }
+
+    #[test]
+    fn test_restore_similarity_chunk_with_offset_right() {
+        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let data2 = data[..8000].to_vec();
+        let mut sbc_map = SBCMap::new();
+
+        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map, data.as_slice(), 0);
+        let (_, _, sbc_hash_2) = encode_delta_chunk(
+            &mut sbc_map,
+            data2.as_slice(),
+            3,
+            data.as_slice(),
+            sbc_hash.key,
+        );
+
+        assert_eq!(sbc_map.get(&sbc_hash_2).unwrap(), data2)
+    }
+
+    #[test]
+    fn test_restore_similarity_chunk_with_offset() {
+        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let mut data2 = data[15..8000].to_vec();
+        data2[0] = data2[0] / 3;
+        data2[7000] = data2[7000] / 3;
+
+        let mut sbc_map = SBCMap::new();
+
+        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map, data.as_slice(), 0);
+        let (_, _, sbc_hash_2) = encode_delta_chunk(
+            &mut sbc_map,
+            data2.as_slice(),
+            3,
+            data.as_slice(),
+            sbc_hash.key,
+        );
+
+        assert_eq!(sbc_map.get(&sbc_hash_2).unwrap(), data2)
+    }
+
+    #[test]
+    fn test_restore_similarity_chunk_with_cyclic_shift_right() {
+        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let mut data2 = data.clone();
+        data2.extend(&data[8000..]);
+
+        let mut sbc_map = SBCMap::new();
+
+        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map, data.as_slice(), 0);
+        let (_, _, sbc_hash_2) = encode_delta_chunk(
+            &mut sbc_map,
+            data2.as_slice(),
+            3,
+            data.as_slice(),
+            sbc_hash.key,
+        );
+        assert_ne!(data, []);
+        assert_eq!(sbc_hash_2.chunk_type, ChunkType::Delta(0));
+        assert_eq!(sbc_map.get(&sbc_hash_2).unwrap(), data2)
+    }
+    #[test]
+    fn test_restore_similarity_chunk_with_cyclic_shift_left() {
+        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let mut data2 = data[..192].to_vec();
+        data2.extend(&data);
+
+        let mut sbc_map = SBCMap::new();
+
+        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map, data.as_slice(), 0);
+        let (_, _, sbc_hash_2) = encode_delta_chunk(
+            &mut sbc_map,
+            data2.as_slice(),
+            3,
+            data.as_slice(),
+            sbc_hash.key,
+        );
+        assert_ne!(data, []);
+        assert_eq!(sbc_hash_2.chunk_type, ChunkType::Delta(0));
+        assert_eq!(sbc_map.get(&sbc_hash_2).unwrap(), data2)
+    }
+
 }
