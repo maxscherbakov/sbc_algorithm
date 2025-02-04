@@ -16,12 +16,16 @@ fn find_id_non_eq_byte(data_chunk: &[u8], data_chunk_parent: &[u8]) -> (usize, u
         }
     }
     let mut id_non_eq_byte_end = 0;
-    if !((data_chunk.len() <= id_non_eq_byte_start) | (data_chunk_parent.len() <= id_non_eq_byte_start)) {
+    if !((data_chunk.len() <= id_non_eq_byte_start)
+        | (data_chunk_parent.len() <= id_non_eq_byte_start))
+    {
         while data_chunk[data_chunk.len() - id_non_eq_byte_end - 1]
             == data_chunk_parent[data_chunk_parent.len() - id_non_eq_byte_end - 1]
         {
             id_non_eq_byte_end += 1;
-            if min(data_chunk.len(), data_chunk_parent.len()) - id_non_eq_byte_end == id_non_eq_byte_start {
+            if min(data_chunk.len(), data_chunk_parent.len()) - id_non_eq_byte_end
+                == id_non_eq_byte_start
+            {
                 break;
             }
         }
@@ -32,17 +36,16 @@ fn find_id_non_eq_byte(data_chunk: &[u8], data_chunk_parent: &[u8]) -> (usize, u
 pub(crate) fn encode(data_chunk: &[u8], data_chunk_parent: &[u8]) -> Option<Vec<u32>> {
     let max_len_delta_code = data_chunk.len() as u32;
     let mut delta_code = Vec::new();
-    let (id_non_eq_byte_start, id_non_eq_byte_end) = find_id_non_eq_byte(data_chunk, data_chunk_parent);
+    let (id_non_eq_byte_start, id_non_eq_byte_end) =
+        find_id_non_eq_byte(data_chunk, data_chunk_parent);
 
+    let data_chunk =
+        data_chunk[id_non_eq_byte_start..data_chunk.len() - id_non_eq_byte_end].to_vec();
+    let data_chunk_parent = data_chunk_parent
+        [id_non_eq_byte_start..data_chunk_parent.len() - id_non_eq_byte_end]
+        .to_vec();
 
-    let data_chunk = data_chunk[id_non_eq_byte_start..data_chunk.len() - id_non_eq_byte_end].to_vec();
-    let data_chunk_parent = data_chunk_parent[id_non_eq_byte_start..data_chunk_parent.len() - id_non_eq_byte_end].to_vec();
-
-
-    let matrix = levenshtein_matrix(
-        data_chunk.as_slice(),
-        data_chunk_parent.as_slice(),
-    );
+    let matrix = levenshtein_matrix(data_chunk.as_slice(), data_chunk_parent.as_slice());
 
     if matrix[matrix.len() - 1][matrix[0].len() - 1] * 4 + 4 > max_len_delta_code {
         return None;
@@ -52,8 +55,7 @@ pub(crate) fn encode(data_chunk: &[u8], data_chunk_parent: &[u8]) -> Option<Vec<
     while x > 0 || y > 0 {
         if x > 0
             && y > 0
-            && (data_chunk_parent[y - 1]
-                != data_chunk[x - 1])
+            && (data_chunk_parent[y - 1] != data_chunk[x - 1])
             && (matrix[y - 1][x - 1] < matrix[y][x])
         {
             delta_code.push(encode_delta_action(

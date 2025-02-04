@@ -60,9 +60,9 @@ impl Database<SBCHash, Vec<u8>> for SBCMap {
         Ok(chunk)
     }
 
-    fn remove(&mut self, sbc_hash: &SBCHash) {
-        self.sbc_hashmap.remove(sbc_hash);
-    }
+    // fn remove(&mut self, sbc_hash: &SBCHash) {
+    //     self.sbc_hashmap.remove(sbc_hash);
+    // }
 
     fn contains(&self, key: &SBCHash) -> bool {
         self.sbc_hashmap.contains_key(key)

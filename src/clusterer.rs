@@ -397,5 +397,4 @@ mod test {
         assert_eq!(sbc_hash_2.chunk_type, ChunkType::Delta(0));
         assert_eq!(sbc_map.get(&sbc_hash_2).unwrap(), data2)
     }
-
 }

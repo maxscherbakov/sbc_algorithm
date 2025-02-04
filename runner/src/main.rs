@@ -26,7 +26,7 @@ fn main() -> io::Result<()> {
         Sha256Hasher::default(),
     );
     let chunk_size = SizeParams::new(2000, 12000, 16384);
-    let mut handle = fs.create_file("file".to_string(), RabinChunker::new(chunk_size), true)?;
+    let mut handle = fs.create_file("file".to_string(), RabinChunker::new(chunk_size))?;
     let data = std::fs::read("runner/files/my_data")?;
     println!("data was read");
     fs.write_to_file(&mut handle, &data)?;

@@ -16,7 +16,7 @@ mod test {
             Sha256Hasher::default(),
         );
         let mut handle = fs
-            .create_file("file".to_string(), SuperChunker::default(), true)
+            .create_file("file".to_string(), SuperChunker::default())
             .unwrap();
         let data = generate_data(8);
         fs.write_to_file(&mut handle, &data).unwrap();
