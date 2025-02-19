@@ -1,17 +1,16 @@
+use crate::decoders::Decoder;
+use crate::encoders::{Encoder};
 use crate::graph::Graph;
-use crate::levenshtein_functions::{
-    get_delta_action,
-    Action::{Add, Del, Rep},
-};
-use crate::{clusterer, hash_functions, ChunkType, SBCHash, SBCMap};
+use crate::{hash_functions, ChunkType, SBCHash, SBCMap};
 use chunkfs::{
     ChunkHash, Data, DataContainer, Database, IterableDatabase, Scrub, ScrubMeasurements,
 };
 use std::collections::HashMap;
 use std::io;
+use std::io::{Error, ErrorKind};
 use std::time::Instant;
 
-impl Database<SBCHash, Vec<u8>> for SBCMap {
+impl<D: Decoder> Database<SBCHash, Vec<u8>> for SBCMap<D> {
     fn insert(&mut self, sbc_hash: SBCHash, chunk: Vec<u8>) -> io::Result<()> {
         self.sbc_hashmap.insert(sbc_hash, chunk);
         Ok(())
@@ -19,9 +18,7 @@ impl Database<SBCHash, Vec<u8>> for SBCMap {
 
     fn get(&self, sbc_hash: &SBCHash) -> io::Result<Vec<u8>> {
         let sbc_value = match self.sbc_hashmap.get(sbc_hash) {
-            None => {
-                panic!("{}, {:?}", sbc_hash.key, sbc_hash.chunk_type)
-            }
+            None => return Err(Error::new(ErrorKind::NotFound, "!")),
             Some(data) => data,
         };
 
@@ -32,29 +29,14 @@ impl Database<SBCHash, Vec<u8>> for SBCMap {
                 buf.copy_from_slice(&sbc_value[..4]);
 
                 let parent_hash = u32::from_be_bytes(buf);
-                let mut data = self
+                let parent_data = self
                     .get(&SBCHash {
                         key: parent_hash,
                         chunk_type: ChunkType::Simple,
                     })
                     .unwrap();
 
-                let mut byte_index = 4;
-                while byte_index < sbc_value.len() {
-                    buf.copy_from_slice(&sbc_value[byte_index..byte_index + 4]);
-                    let delta_action = u32::from_be_bytes(buf);
-
-                    let (action, index, byte_value) = get_delta_action(delta_action);
-                    match action {
-                        Del => {
-                            data.remove(index);
-                        }
-                        Add => data.insert(index, byte_value),
-                        Rep => data[index] = byte_value,
-                    }
-                    byte_index += 4;
-                }
-                data
+                self.decoder.decode_chunk(parent_data, sbc_value.as_slice())
             }
         };
         Ok(chunk)
@@ -69,32 +51,52 @@ impl Database<SBCHash, Vec<u8>> for SBCMap {
     }
 }
 
-pub struct SBCScrubber {
-    graph: Graph,
+impl<D: Decoder> IterableDatabase<SBCHash, Vec<u8>> for SBCMap<D> {
+    fn iterator(&self) -> Box<dyn Iterator<Item = (&SBCHash, &Vec<u8>)> + '_> {
+        Box::new(self.sbc_hashmap.iter())
+    }
+    fn iterator_mut(&mut self) -> Box<dyn Iterator<Item = (&SBCHash, &mut Vec<u8>)> + '_> {
+        Box::new(self.sbc_hashmap.iter_mut())
+    }
+
+    fn clear(&mut self) -> io::Result<()> {
+        HashMap::clear(&mut self.sbc_hashmap);
+        Ok(())
+    }
 }
 
-impl SBCScrubber {
-    pub fn new() -> SBCScrubber {
+pub struct SBCScrubber<E>
+where
+    E: Encoder,
+{
+    graph: Graph,
+    encoder: E,
+}
+
+impl<E: Encoder> SBCScrubber<E> {
+    pub fn new(_encoder: E) -> SBCScrubber<E> {
         SBCScrubber {
             graph: Graph::new(),
+            encoder: _encoder,
         }
     }
 }
 
-impl Default for SBCScrubber {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// impl<E: Encoder> Default for SBCScrubber<E> {
+//     fn default() -> SBCScrubber<LevenshteinEncoder> {
+//         Self::new(LevenshteinEncoder)
+//     }
+// }
 
-impl<Hash: ChunkHash, B> Scrub<Hash, B, SBCHash, SBCMap> for SBCScrubber
+impl<Hash: ChunkHash, B, D: Decoder, E: Encoder> Scrub<Hash, B, SBCHash, SBCMap<D>>
+    for SBCScrubber<E>
 where
     B: IterableDatabase<Hash, DataContainer<SBCHash>>,
 {
     fn scrub<'a>(
         &mut self,
         database: &mut B,
-        target_map: &mut SBCMap,
+        target_map: &mut SBCMap<D>,
     ) -> io::Result<ScrubMeasurements>
     where
         Hash: 'a,
@@ -117,7 +119,7 @@ where
         let time_hashing = time_start.elapsed();
         println!("time for hashing: {time_hashing:?}");
         let (clusters_data_left, clusters_processed_data) =
-            clusterer::encode_clusters(&mut clusters, target_map);
+            self.encoder.encode_clusters(&mut clusters, target_map);
         data_left += clusters_data_left;
         processed_data += clusters_processed_data;
         let running_time = time_start.elapsed();

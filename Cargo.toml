@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-chunkfs = "0.1.1"
+chunkfs = "0.1"
 
 [dev-dependencies]
 rand = "0.8.5"

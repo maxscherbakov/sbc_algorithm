@@ -1,9 +1,11 @@
+use crate::decoders::Decoder;
 pub use chunkfs_sbc::SBCScrubber;
 pub use hash_functions::sbc_hashing;
 use std::collections::HashMap;
 
 mod chunkfs_sbc;
-mod clusterer;
+pub mod decoders;
+pub mod encoders;
 mod graph;
 mod hash_functions;
 mod levenshtein_functions;
@@ -21,20 +23,22 @@ pub struct SBCHash {
     chunk_type: ChunkType,
 }
 
-pub struct SBCMap {
+pub struct SBCMap<D: Decoder> {
     sbc_hashmap: HashMap<SBCHash, Vec<u8>>,
+    decoder: D,
 }
 
-impl SBCMap {
-    pub fn new() -> SBCMap {
+impl<D: Decoder> SBCMap<D> {
+    pub fn new(_decoder: D) -> SBCMap<D> {
         SBCMap {
             sbc_hashmap: HashMap::new(),
+            decoder: _decoder,
         }
     }
 }
 
-impl Default for SBCMap {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// impl Default for SBCMap {
+//     fn default() -> Self {
+//         Self::new()
+//     }
+// }
