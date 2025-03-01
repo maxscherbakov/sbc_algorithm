@@ -82,13 +82,68 @@ pub trait Encoder {
         &self,
         clusters: &mut HashMap<u32, Vec<(u32, &mut DataContainer<SBCHash>)>>,
         target_map: &mut SBCMap<D>,
+    ) -> (usize, usize) {
+        let mut data_left = 0;
+        let mut processed_data = 0;
+        for (parent_hash, cluster) in clusters.iter_mut() {
+            let data_analyse =
+                self.encode_cluster(target_map, cluster.as_mut_slice(), *parent_hash);
+            data_left += data_analyse.0;
+            processed_data += data_analyse.1;
+        }
+        (data_left, processed_data)
+    }
+
+    fn encode_cluster<D: Decoder>(
+        &self,
+        target_map: &mut SBCMap<D>,
+        cluster: &mut [(u32, &mut DataContainer<SBCHash>)],
+        parent_hash: u32,
     ) -> (usize, usize);
 }
 
 pub struct LevenshteinEncoder;
 
 impl LevenshteinEncoder {
+    fn encode_delta_chunk<D: Decoder>(
+        target_map: &mut SBCMap<D>,
+        data: &[u8],
+        hash: u32,
+        parent_data: &[u8],
+        parent_hash: u32,
+    ) -> (usize, usize, SBCHash) {
+        let number_delta_chunk = count_delta_chunks_with_hash(target_map, hash);
+        let sbc_hash = SBCHash {
+            key: hash,
+            chunk_type: ChunkType::Delta(number_delta_chunk),
+        };
+        let mut delta_chunk = Vec::new();
+        for byte in parent_hash.to_be_bytes() {
+            delta_chunk.push(byte);
+        }
+
+        match levenshtein_functions::encode(data, parent_data) {
+            None => {
+                let (data_left, sbc_hash) = encode_simple_chunk(target_map, data, hash);
+                (data_left, 0, sbc_hash)
+            }
+            Some(delta_code) => {
+                for delta_action in delta_code {
+                    for byte in delta_action.to_be_bytes() {
+                        delta_chunk.push(byte);
+                    }
+                }
+                let processed_data = delta_chunk.len();
+                let _ = target_map.insert(sbc_hash.clone(), delta_chunk);
+                (0, processed_data, sbc_hash)
+            }
+        }
+    }
+}
+
+impl Encoder for LevenshteinEncoder {
     fn encode_cluster<D: Decoder>(
+        &self,
         target_map: &mut SBCMap<D>,
         cluster: &mut [(u32, &mut DataContainer<SBCHash>)],
         parent_hash: u32,
@@ -128,58 +183,6 @@ impl LevenshteinEncoder {
                 Data::TargetChunk(_) => {}
             }
             data_container.make_target(vec![target_hash]);
-        }
-        (data_left, processed_data)
-    }
-    fn encode_delta_chunk<D: Decoder>(
-        target_map: &mut SBCMap<D>,
-        data: &[u8],
-        hash: u32,
-        parent_data: &[u8],
-        parent_hash: u32,
-    ) -> (usize, usize, SBCHash) {
-        let number_delta_chunk = count_delta_chunks_with_hash(target_map, hash);
-        let sbc_hash = SBCHash {
-            key: hash,
-            chunk_type: ChunkType::Delta(number_delta_chunk),
-        };
-        let mut delta_chunk = Vec::new();
-        for byte in parent_hash.to_be_bytes() {
-            delta_chunk.push(byte);
-        }
-
-        match levenshtein_functions::encode(data, parent_data) {
-            None => {
-                let (data_left, sbc_hash) = encode_simple_chunk(target_map, data, hash);
-                (data_left, 0, sbc_hash)
-            }
-            Some(delta_code) => {
-                for delta_action in delta_code {
-                    for byte in delta_action.to_be_bytes() {
-                        delta_chunk.push(byte);
-                    }
-                }
-                let processed_data = delta_chunk.len();
-                let _ = target_map.insert(sbc_hash.clone(), delta_chunk);
-                (0, processed_data, sbc_hash)
-            }
-        }
-    }
-}
-
-impl Encoder for LevenshteinEncoder {
-    fn encode_clusters<D: Decoder>(
-        &self,
-        clusters: &mut HashMap<u32, Vec<(u32, &mut DataContainer<SBCHash>)>>,
-        target_map: &mut SBCMap<D>,
-    ) -> (usize, usize) {
-        let mut data_left = 0;
-        let mut processed_data = 0;
-        for (parent_hash, cluster) in clusters.iter_mut() {
-            let data_analyse =
-                Self::encode_cluster(target_map, cluster.as_mut_slice(), *parent_hash);
-            data_left += data_analyse.0;
-            processed_data += data_analyse.1;
         }
         (data_left, processed_data)
     }
@@ -269,7 +272,11 @@ impl GdeltaEncoder {
         let _ = target_map.insert(sbc_hash.clone(), delta_code);
         (0, processed_data, sbc_hash)
     }
+}
+
+impl Encoder for GdeltaEncoder {
     fn encode_cluster<D: Decoder>(
+        &self,
         target_map: &mut SBCMap<D>,
         cluster: &mut [(u32, &mut DataContainer<SBCHash>)],
         parent_hash: u32,
@@ -315,24 +322,6 @@ impl GdeltaEncoder {
                 Data::TargetChunk(_) => {}
             }
             data_container.make_target(vec![target_hash]);
-        }
-        (data_left, processed_data)
-    }
-}
-
-impl Encoder for GdeltaEncoder {
-    fn encode_clusters<D: Decoder>(
-        &self,
-        clusters: &mut HashMap<u32, Vec<(u32, &mut DataContainer<SBCHash>)>>,
-        target_map: &mut SBCMap<D>,
-    ) -> (usize, usize) {
-        let mut data_left = 0;
-        let mut processed_data = 0;
-        for (parent_hash, cluster) in clusters.iter_mut() {
-            let data_analyse =
-                Self::encode_cluster(target_map, cluster.as_mut_slice(), *parent_hash);
-            data_left += data_analyse.0;
-            processed_data += data_analyse.1;
         }
         (data_left, processed_data)
     }
