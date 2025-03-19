@@ -32,7 +32,7 @@ impl Graph {
         parent
     }
 
-    pub fn add_vertex(&mut self, hash: u32) -> u32 {
+    pub fn set_parent_vertex(&mut self, hash: u32) -> u32 {
         let mut min_dist = u32::MAX;
         let mut parent_hash = hash;
         for other_hash in hash - std::cmp::min(hash, MAX_WEIGHT_EDGE)

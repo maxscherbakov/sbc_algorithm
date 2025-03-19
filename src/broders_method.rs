@@ -6,21 +6,21 @@ const RABIN_HASH_X: u32 = 43;
 const RABIN_HASH_Q: u32 = (1 << 31) - 1;
 
 fn set_for_chunk(data: &[u8]) -> HashSet<u32> {
-    let size_block = WORD_LEN * COUNT_WORDS;
+    let block_size = WORD_LEN * COUNT_WORDS;
     let mut set_blocks = HashSet::new();
-    let mut rabin_hash = rabin_hash_simple(&data[0..std::cmp::min(size_block, data.len())]);
+    let mut rabin_hash = rabin_hash_simple(&data[0..std::cmp::min(block_size, data.len())]);
 
     for index_word in (0..data.len()).step_by(WORD_LEN) {
         set_blocks.insert(rabin_hash);
-        if index_word + size_block > data.len() {
+        if index_word + block_size > data.len() {
             break;
         }
         rabin_hash = rabin_hash_next(
             rabin_hash,
             hash_word(&data[index_word..index_word + WORD_LEN]),
             hash_word(
-                &data[index_word + size_block
-                    ..std::cmp::min(index_word + size_block + WORD_LEN, data.len())],
+                &data[index_word + block_size
+                    ..std::cmp::min(index_word + block_size + WORD_LEN, data.len())],
             ),
         );
     }

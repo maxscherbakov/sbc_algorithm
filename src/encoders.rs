@@ -1,19 +1,15 @@
 use crate::decoders::Decoder;
 use crate::levenshtein_functions;
 use crate::{ChunkType, SBCHash, SBCMap};
-use chunkfs::{Data, DataContainer, Database};
+use chunkfs::{Data, DataContainer, Database, IterableDatabase};
 use std::cmp::min;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use rayon::prelude::*;
 
 fn count_delta_chunks_with_hash<D: Decoder>(target_map: &mut SBCMap<D>, hash: u32) -> u16 {
-    let mut count = 0;
-    while target_map.contains(&SBCHash {
-        key: hash,
-        chunk_type: ChunkType::Delta(count),
-    }) {
-        count += 1
-    }
-    count
+    let count = target_map.iterator().filter(|(sbc_hash, _)| sbc_hash.key == hash).count() - 1;
+    count as u16
 }
 
 fn find_empty_cell<D: Decoder>(target_map: &SBCMap<D>, hash: u32) -> u32 {
@@ -53,31 +49,73 @@ fn encode_simple_chunk<D: Decoder>(
     (data.len(), sbc_hash)
 }
 
+struct ParentChunkInCluster {
+    index: i32,
+    parent_data: Vec<u8>,
+    data_left: usize,
+}
+
 fn get_parent_data<D: Decoder>(
     target_map: &mut SBCMap<D>,
     parent_hash: u32,
     cluster: &mut [(u32, &mut DataContainer<SBCHash>)],
-) -> (i32, Vec<u8>, usize) {
+) -> ParentChunkInCluster {
     match target_map.get(&SBCHash {
         key: parent_hash,
         chunk_type: ChunkType::Simple,
     }) {
-        Ok(data) => (-1, data, 0),
+        Ok(parent_data) => ParentChunkInCluster {index: -1, parent_data, data_left: 0},
         Err(_) => {
             let (_, parent_data_container) = &mut cluster[0];
             let parent_data = match parent_data_container.extract() {
                 Data::Chunk(data) => data.clone(),
                 Data::TargetChunk(_) => panic!(),
             };
-            let (left, parent_sbc_hash) =
+            let (data_left, parent_sbc_hash) =
                 encode_simple_chunk(target_map, parent_data.as_slice(), parent_hash);
             parent_data_container.make_target(vec![parent_sbc_hash]);
-            (0, parent_data, left)
+            ParentChunkInCluster {index: 0, parent_data, data_left}
         }
     }
 }
 
+/// A trait for encoding data clusters using Similarity Based Chunking (SBC).
+///
+/// Implementors of this trait provide methods to efficiently encode data chunks
+/// by creating delta codes relative to parent chunks in a hierarchy.
 pub trait Encoder {
+    /// Encodes a single cluster of data chunks relative to a parent hash.
+    ///
+    /// # Parameters
+    /// - `target_map`: Mutable reference to the SBC structure tracking chunk relationships
+    /// - `cluster`: Mutable slice of (hash, data container) tuples to encode
+    /// - `parent_hash`: Identifier for the parent chunk used as delta reference
+    ///
+    /// # Returns
+    /// A tuple containing:
+    /// - `usize`: Amount of unprocessed data remaining in cluster
+    /// - `usize`: Amount of data successfully processed and encoded
+    fn encode_cluster<D: Decoder>(
+        &self,
+        target_map: &mut SBCMap<D>,
+        cluster: &mut [(u32, &mut DataContainer<SBCHash>)],
+        parent_hash: u32,
+    ) -> (usize, usize);
+
+    /// Batch processes multiple clusters through the encoding pipeline.
+    ///
+    /// # Parameters
+    /// - `clusters`: Mutable HashMap of parent hashes to their associated data clusters
+    /// - `target_map`: Mutable reference to the SBC structure tracking relationships
+    ///
+    /// # Returns
+    /// A tuple containing:
+    /// - `usize`: Total unprocessed data across all clusters
+    /// - `usize`: Total processed data across all clusters
+    ///
+    /// # Note
+    /// Provides default implementation that iterates through all clusters,
+    /// but can be overridden for optimized batch processing strategies.
     fn encode_clusters<D: Decoder>(
         &self,
         clusters: &mut HashMap<u32, Vec<(u32, &mut DataContainer<SBCHash>)>>,
@@ -85,6 +123,8 @@ pub trait Encoder {
     ) -> (usize, usize) {
         let mut data_left = 0;
         let mut processed_data = 0;
+        let target_map_lock = Arc::new(Mutex::new(target_map));
+        clusters
         for (parent_hash, cluster) in clusters.iter_mut() {
             let data_analyse =
                 self.encode_cluster(target_map, cluster.as_mut_slice(), *parent_hash);
@@ -93,14 +133,8 @@ pub trait Encoder {
         }
         (data_left, processed_data)
     }
-
-    fn encode_cluster<D: Decoder>(
-        &self,
-        target_map: &mut SBCMap<D>,
-        cluster: &mut [(u32, &mut DataContainer<SBCHash>)],
-        parent_hash: u32,
-    ) -> (usize, usize);
 }
+
 
 pub struct LevenshteinEncoder;
 
@@ -149,20 +183,17 @@ impl Encoder for LevenshteinEncoder {
         parent_hash: u32,
     ) -> (usize, usize) {
         let mut processed_data = 0;
-        let not_delta_encoded = Option::<HashSet<usize>>::None;
-        let (parent_id_in_cluster, parent_data, mut data_left) =
+        let parent_chunk =
             get_parent_data(target_map, parent_hash, cluster);
+        let mut data_left = parent_chunk.data_left;
         for (chunk_id, (hash, data_container)) in cluster.iter_mut().enumerate() {
-            if parent_id_in_cluster > -1 && chunk_id == parent_id_in_cluster as usize {
+            if parent_chunk.index > -1 && chunk_id == parent_chunk.index as usize {
                 continue;
             }
             let mut target_hash = SBCHash::default();
             match data_container.extract() {
                 Data::Chunk(data) => {
-                    if match not_delta_encoded.clone() {
-                        None => false,
-                        Some(set) => set.contains(&chunk_id),
-                    } || data.len().abs_diff(parent_data.len()) > 4000
+                    if data.len().abs_diff(parent_chunk.parent_data.len()) > 4000
                     {
                         let (left, sbc_hash) = encode_simple_chunk(target_map, data, *hash);
                         data_left += left;
@@ -172,7 +203,7 @@ impl Encoder for LevenshteinEncoder {
                             target_map,
                             data,
                             *hash,
-                            parent_data.as_slice(),
+                            parent_chunk.parent_data.as_slice(),
                             parent_hash,
                         );
                         data_left += left;
@@ -282,8 +313,10 @@ impl Encoder for GdeltaEncoder {
         parent_hash: u32,
     ) -> (usize, usize) {
         let mut processed_data = 0;
-        let (parent_id_in_cluster, parent_data, mut data_left) =
+        let parent_chunk =
             get_parent_data(target_map, parent_hash, cluster);
+        let mut data_left = parent_chunk.data_left;
+        let parent_data = parent_chunk.parent_data;
         let word_size: usize = 16;
         let move_bts: usize = 64 / word_size;
         let mut word_hash_offsets: HashMap<u64, usize> = HashMap::new();
@@ -301,7 +334,7 @@ impl Encoder for GdeltaEncoder {
         }
 
         for (chunk_id, (hash, data_container)) in cluster.iter_mut().enumerate() {
-            if parent_id_in_cluster > -1 && chunk_id == parent_id_in_cluster as usize {
+            if parent_chunk.index > -1 && chunk_id == parent_chunk.index as usize {
                 continue;
             }
             let mut target_hash = SBCHash::default();

@@ -159,6 +159,7 @@ mod test {
         let name = &format!("{:b}", processed_pair);
         assert_eq!(name, "11111111110")
     }
+
     #[test]
     fn test_processing_of_p_spectrum_with_one_pair() {
         let mut p_spectrum = HashMap::new();
@@ -179,6 +180,7 @@ mod test {
         let processed_p_spectrum = processing_of_p_spectrum(p_spectrum);
         assert_eq!(processed_p_spectrum, 0)
     }
+
     #[test]
     fn test_processing_of_p_spectrum() {
         let mut p_spectrum = HashMap::new();

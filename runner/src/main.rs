@@ -23,7 +23,7 @@ fn generate_data(mb_size: usize) -> Vec<u8> {
 }
 
 fn main() -> io::Result<()> {
-    let data = fs::read("runner/files/my_data")?;
+    let data = fs::read("runner/files/kernels.tar")?;
     let chunk_size = SizeParams::new(2 * 1024, 8 * 1024, 16 * 1024);
     let mut fs = FileSystem::new_with_scrubber(
         HashMap::default(),
