@@ -39,5 +39,9 @@ fn main() -> io::Result<()> {
     let res = fs.scrub().unwrap();
     let sbc_dedup_ratio = fs.total_dedup_ratio();
     println!("{}, {:?}, {}", cdc_dedup_ratio, res, sbc_dedup_ratio);
+
+    let handle = fs.open_file_readonly("file".to_string());
+    let read_data = fs.read_file_complete(&handle.unwrap()).unwrap();
+    assert_eq!(data, read_data);
     Ok(())
 }

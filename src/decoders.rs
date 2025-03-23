@@ -42,7 +42,6 @@ impl Decoder for LevenshteinDecoder {
     }
 }
 
-
 /// Decoder based on Gdelta compression algorithm.
 pub struct GdeltaDecoder;
 
@@ -54,7 +53,7 @@ impl Decoder for GdeltaDecoder {
         while byte_id < delta_code.len() {
             let mut buf = [0u8; 8];
             buf[..3].copy_from_slice(&delta_code[byte_id..byte_id + 3]);
-            
+
             if buf[2] >= 128 {
                 buf[2] -= 128;
                 let insert_len = usize::from_ne_bytes(buf);

@@ -193,7 +193,7 @@ mod test {
         assert_eq!(name, "1001001111000000000000000000000")
     }
 
-    pub fn return_p_spectrum_hash<'a>(data: &[u8]) -> u32 {
+    pub fn return_p_spectrum_hash(data: &[u8]) -> u32 {
         let mut pair_value_pair_frequency = HashMap::new();
         let mut last_byte = data[0];
         for byte in &data[1..] {

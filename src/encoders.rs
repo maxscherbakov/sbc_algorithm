@@ -1,18 +1,29 @@
+use super::chunkfs_sbc::Clusters;
 use crate::decoders::Decoder;
 use crate::levenshtein_functions;
 use crate::{ChunkType, SBCHash, SBCMap};
 use chunkfs::{Data, DataContainer, Database, IterableDatabase};
+use rayon::prelude::*;
+use rayon::ThreadPoolBuilder;
 use std::cmp::min;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use rayon::prelude::*;
+use std::sync::{Arc, Mutex, MutexGuard};
 
-fn count_delta_chunks_with_hash<D: Decoder>(target_map: &mut SBCMap<D>, hash: u32) -> u16 {
-    let count = target_map.iterator().filter(|(sbc_hash, _)| sbc_hash.key == hash).count() - 1;
+fn count_delta_chunks_with_hash<D: Decoder>(
+    target_map: Arc<Mutex<&mut SBCMap<D>>>,
+    hash: u32,
+) -> u16 {
+    let count = target_map
+        .lock()
+        .unwrap()
+        .iterator()
+        .filter(|(sbc_hash, _)| sbc_hash.key == hash)
+        .count()
+        - 1;
     count as u16
 }
 
-fn find_empty_cell<D: Decoder>(target_map: &SBCMap<D>, hash: u32) -> u32 {
+fn find_empty_cell<D: Decoder>(target_map: &MutexGuard<&mut SBCMap<D>>, hash: u32) -> u32 {
     let mut left = hash;
     let mut right = hash + 1;
     loop {
@@ -24,6 +35,7 @@ fn find_empty_cell<D: Decoder>(target_map: &SBCMap<D>, hash: u32) -> u32 {
         } else {
             return left;
         }
+
         if target_map.contains(&SBCHash {
             key: right,
             chunk_type: ChunkType::Simple,
@@ -36,7 +48,7 @@ fn find_empty_cell<D: Decoder>(target_map: &SBCMap<D>, hash: u32) -> u32 {
 }
 
 fn encode_simple_chunk<D: Decoder>(
-    target_map: &mut SBCMap<D>,
+    target_map: &mut MutexGuard<&mut SBCMap<D>>,
     data: &[u8],
     hash: u32,
 ) -> (usize, SBCHash) {
@@ -46,6 +58,7 @@ fn encode_simple_chunk<D: Decoder>(
     };
 
     let _ = target_map.insert(sbc_hash.clone(), data.to_vec());
+
     (data.len(), sbc_hash)
 }
 
@@ -56,15 +69,20 @@ struct ParentChunkInCluster {
 }
 
 fn get_parent_data<D: Decoder>(
-    target_map: &mut SBCMap<D>,
+    target_map: Arc<Mutex<&mut SBCMap<D>>>,
     parent_hash: u32,
     cluster: &mut [(u32, &mut DataContainer<SBCHash>)],
 ) -> ParentChunkInCluster {
-    match target_map.get(&SBCHash {
+    let mut target_map_lock = target_map.lock().unwrap();
+    match target_map_lock.get(&SBCHash {
         key: parent_hash,
         chunk_type: ChunkType::Simple,
     }) {
-        Ok(parent_data) => ParentChunkInCluster {index: -1, parent_data, data_left: 0},
+        Ok(parent_data) => ParentChunkInCluster {
+            index: -1,
+            parent_data,
+            data_left: 0,
+        },
         Err(_) => {
             let (_, parent_data_container) = &mut cluster[0];
             let parent_data = match parent_data_container.extract() {
@@ -72,9 +90,14 @@ fn get_parent_data<D: Decoder>(
                 Data::TargetChunk(_) => panic!(),
             };
             let (data_left, parent_sbc_hash) =
-                encode_simple_chunk(target_map, parent_data.as_slice(), parent_hash);
+                encode_simple_chunk(&mut target_map_lock, parent_data.as_slice(), parent_hash);
+
             parent_data_container.make_target(vec![parent_sbc_hash]);
-            ParentChunkInCluster {index: 0, parent_data, data_left}
+            ParentChunkInCluster {
+                index: 0,
+                parent_data,
+                data_left,
+            }
         }
     }
 }
@@ -97,7 +120,7 @@ pub trait Encoder {
     /// - `usize`: Amount of data successfully processed and encoded
     fn encode_cluster<D: Decoder>(
         &self,
-        target_map: &mut SBCMap<D>,
+        target_map: Arc<Mutex<&mut SBCMap<D>>>,
         cluster: &mut [(u32, &mut DataContainer<SBCHash>)],
         parent_hash: u32,
     ) -> (usize, usize);
@@ -116,37 +139,52 @@ pub trait Encoder {
     /// # Note
     /// Provides default implementation that iterates through all clusters,
     /// but can be overridden for optimized batch processing strategies.
-    fn encode_clusters<D: Decoder>(
+    fn encode_clusters<D: Decoder + Send>(
         &self,
-        clusters: &mut HashMap<u32, Vec<(u32, &mut DataContainer<SBCHash>)>>,
+        clusters: &mut Clusters,
         target_map: &mut SBCMap<D>,
-    ) -> (usize, usize) {
-        let mut data_left = 0;
-        let mut processed_data = 0;
-        let target_map_lock = Arc::new(Mutex::new(target_map));
-        clusters
-        for (parent_hash, cluster) in clusters.iter_mut() {
-            let data_analyse =
-                self.encode_cluster(target_map, cluster.as_mut_slice(), *parent_hash);
-            data_left += data_analyse.0;
-            processed_data += data_analyse.1;
-        }
-        (data_left, processed_data)
+    ) -> (usize, usize)
+    where
+        Self: Sync,
+    {
+        let pool = ThreadPoolBuilder::new().num_threads(6).build().unwrap();
+
+        let data_left = Mutex::new(0);
+        let processed_data = Mutex::new(0);
+        let target_map_ref = Arc::new(Mutex::new(target_map));
+        pool.install(|| {
+            clusters.par_iter_mut().for_each(|(parent_hash, cluster)| {
+                let data_analyse = self.encode_cluster(
+                    target_map_ref.clone(),
+                    cluster.as_mut_slice(),
+                    *parent_hash,
+                );
+
+                let mut data_left_lock = data_left.lock().unwrap();
+                *data_left_lock += data_analyse.0;
+
+                let mut processed_data_lock = processed_data.lock().unwrap();
+                *processed_data_lock += data_analyse.1;
+            });
+        });
+        (
+            data_left.into_inner().unwrap(),
+            processed_data.into_inner().unwrap(),
+        )
     }
 }
-
 
 pub struct LevenshteinEncoder;
 
 impl LevenshteinEncoder {
     fn encode_delta_chunk<D: Decoder>(
-        target_map: &mut SBCMap<D>,
+        target_map: Arc<Mutex<&mut SBCMap<D>>>,
         data: &[u8],
         hash: u32,
         parent_data: &[u8],
         parent_hash: u32,
     ) -> (usize, usize, SBCHash) {
-        let number_delta_chunk = count_delta_chunks_with_hash(target_map, hash);
+        let number_delta_chunk = count_delta_chunks_with_hash(target_map.clone(), hash);
         let sbc_hash = SBCHash {
             key: hash,
             chunk_type: ChunkType::Delta(number_delta_chunk),
@@ -158,7 +196,8 @@ impl LevenshteinEncoder {
 
         match levenshtein_functions::encode(data, parent_data) {
             None => {
-                let (data_left, sbc_hash) = encode_simple_chunk(target_map, data, hash);
+                let (data_left, sbc_hash) =
+                    encode_simple_chunk(&mut target_map.clone().lock().unwrap(), data, hash);
                 (data_left, 0, sbc_hash)
             }
             Some(delta_code) => {
@@ -168,7 +207,9 @@ impl LevenshteinEncoder {
                     }
                 }
                 let processed_data = delta_chunk.len();
-                let _ = target_map.insert(sbc_hash.clone(), delta_chunk);
+
+                let mut target_map_lock = target_map.lock().unwrap();
+                let _ = target_map_lock.insert(sbc_hash.clone(), delta_chunk);
                 (0, processed_data, sbc_hash)
             }
         }
@@ -178,13 +219,12 @@ impl LevenshteinEncoder {
 impl Encoder for LevenshteinEncoder {
     fn encode_cluster<D: Decoder>(
         &self,
-        target_map: &mut SBCMap<D>,
+        target_map: Arc<Mutex<&mut SBCMap<D>>>,
         cluster: &mut [(u32, &mut DataContainer<SBCHash>)],
         parent_hash: u32,
     ) -> (usize, usize) {
         let mut processed_data = 0;
-        let parent_chunk =
-            get_parent_data(target_map, parent_hash, cluster);
+        let parent_chunk = get_parent_data(target_map.clone(), parent_hash, cluster);
         let mut data_left = parent_chunk.data_left;
         for (chunk_id, (hash, data_container)) in cluster.iter_mut().enumerate() {
             if parent_chunk.index > -1 && chunk_id == parent_chunk.index as usize {
@@ -193,14 +233,17 @@ impl Encoder for LevenshteinEncoder {
             let mut target_hash = SBCHash::default();
             match data_container.extract() {
                 Data::Chunk(data) => {
-                    if data.len().abs_diff(parent_chunk.parent_data.len()) > 4000
-                    {
-                        let (left, sbc_hash) = encode_simple_chunk(target_map, data, *hash);
+                    if data.len().abs_diff(parent_chunk.parent_data.len()) > 4000 {
+                        let (left, sbc_hash) = encode_simple_chunk(
+                            &mut target_map.clone().lock().unwrap(),
+                            data,
+                            *hash,
+                        );
                         data_left += left;
                         target_hash = sbc_hash;
                     } else {
                         let (left, processed, sbc_hash) = Self::encode_delta_chunk(
-                            target_map,
+                            target_map.clone(),
                             data,
                             *hash,
                             parent_chunk.parent_data.as_slice(),
@@ -223,7 +266,7 @@ pub struct GdeltaEncoder;
 
 impl GdeltaEncoder {
     fn encode_delta_chunk<D: Decoder>(
-        target_map: &mut SBCMap<D>,
+        target_map: Arc<Mutex<&mut SBCMap<D>>>,
         chunk_data: &[u8],
         hash: u32,
         parent_data: &[u8],
@@ -234,7 +277,7 @@ impl GdeltaEncoder {
         for byte in parent_hash.to_be_bytes() {
             delta_code.push(byte);
         }
-        let number_delta_chunk = count_delta_chunks_with_hash(target_map, hash);
+        let number_delta_chunk = count_delta_chunks_with_hash(target_map.clone(), hash);
         let sbc_hash = SBCHash {
             key: hash,
             chunk_type: ChunkType::Delta(number_delta_chunk),
@@ -300,7 +343,8 @@ impl GdeltaEncoder {
             j += 1
         }
         let processed_data = delta_code.len();
-        let _ = target_map.insert(sbc_hash.clone(), delta_code);
+        let mut target_map_lock = target_map.lock().unwrap();
+        let _ = target_map_lock.insert(sbc_hash.clone(), delta_code);
         (0, processed_data, sbc_hash)
     }
 }
@@ -308,13 +352,12 @@ impl GdeltaEncoder {
 impl Encoder for GdeltaEncoder {
     fn encode_cluster<D: Decoder>(
         &self,
-        target_map: &mut SBCMap<D>,
+        target_map: Arc<Mutex<&mut SBCMap<D>>>,
         cluster: &mut [(u32, &mut DataContainer<SBCHash>)],
         parent_hash: u32,
     ) -> (usize, usize) {
         let mut processed_data = 0;
-        let parent_chunk =
-            get_parent_data(target_map, parent_hash, cluster);
+        let parent_chunk = get_parent_data(target_map.clone(), parent_hash, cluster);
         let mut data_left = parent_chunk.data_left;
         let parent_data = parent_chunk.parent_data;
         let word_size: usize = 16;
@@ -341,7 +384,7 @@ impl Encoder for GdeltaEncoder {
             match data_container.extract() {
                 Data::Chunk(data) => {
                     let (left, processed, sbc_hash) = Self::encode_delta_chunk(
-                        target_map,
+                        target_map.clone(),
                         data,
                         *hash,
                         parent_data.as_slice(),
@@ -357,186 +400,6 @@ impl Encoder for GdeltaEncoder {
             data_container.make_target(vec![target_hash]);
         }
         (data_left, processed_data)
-    }
-}
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::decoders::LevenshteinDecoder;
-    #[test]
-    fn test_restore_similarity_chunk_1_byte_diff() {
-        let mut data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
-        let data2 = data.clone();
-        if data[15] < 255 {
-            data[15] = 255;
-        } else {
-            data[15] = 0;
-        }
-        let mut sbc_map = SBCMap::new(LevenshteinDecoder);
-
-        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map, data.as_slice(), 0);
-        let (_, _, sbc_hash_2) = LevenshteinEncoder::encode_delta_chunk(
-            &mut sbc_map,
-            data2.as_slice(),
-            3,
-            data.as_slice(),
-            sbc_hash.key,
-        );
-
-        assert_eq!(sbc_map.get(&sbc_hash_2).unwrap(), data2)
-    }
-    #[test]
-    fn test_restore_similarity_chunk_2_neighbor_byte_diff() {
-        let mut data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
-        let data2 = data.clone();
-        if data[15] < 255 {
-            data[15] = 255;
-        } else {
-            data[15] = 0;
-        }
-        if data[16] < 255 {
-            data[16] = 255;
-        } else {
-            data[16] = 0;
-        }
-        let mut sbc_map = SBCMap::new(LevenshteinDecoder);
-
-        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map, data.as_slice(), 0);
-        let (_, _, sbc_hash_2) = LevenshteinEncoder::encode_delta_chunk(
-            &mut sbc_map,
-            data2.as_slice(),
-            3,
-            data.as_slice(),
-            sbc_hash.key,
-        );
-
-        assert_eq!(sbc_map.get(&sbc_hash_2).unwrap(), data2)
-    }
-
-    #[test]
-    fn test_restore_similarity_chunk_2_byte_diff() {
-        let mut data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
-        let data2 = data.clone();
-        if data[15] < 255 {
-            data[15] = 255;
-        } else {
-            data[15] = 0;
-        }
-        if data[106] < 255 {
-            data[106] = 255;
-        } else {
-            data[106] = 0;
-        }
-        let mut sbc_map = SBCMap::new(LevenshteinDecoder);
-
-        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map, data.as_slice(), 0);
-        let (_, _, sbc_hash_2) = LevenshteinEncoder::encode_delta_chunk(
-            &mut sbc_map,
-            data2.as_slice(),
-            3,
-            data.as_slice(),
-            sbc_hash.key,
-        );
-
-        assert_eq!(sbc_map.get(&sbc_hash_2).unwrap(), data2)
-    }
-
-    #[test]
-    fn test_restore_similarity_chunk_with_offset_left() {
-        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
-        let data2 = data[15..].to_vec();
-        let mut sbc_map = SBCMap::new(LevenshteinDecoder);
-
-        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map, data.as_slice(), 0);
-        let (_, _, sbc_hash_2) = LevenshteinEncoder::encode_delta_chunk(
-            &mut sbc_map,
-            data2.as_slice(),
-            3,
-            data.as_slice(),
-            sbc_hash.key,
-        );
-
-        assert_eq!(sbc_map.get(&sbc_hash_2).unwrap(), data2)
-    }
-
-    #[test]
-    fn test_restore_similarity_chunk_with_offset_right() {
-        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
-        let data2 = data[..8000].to_vec();
-        let mut sbc_map = SBCMap::new(LevenshteinDecoder);
-
-        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map, data.as_slice(), 0);
-        let (_, _, sbc_hash_2) = LevenshteinEncoder::encode_delta_chunk(
-            &mut sbc_map,
-            data2.as_slice(),
-            3,
-            data.as_slice(),
-            sbc_hash.key,
-        );
-
-        assert_eq!(sbc_map.get(&sbc_hash_2).unwrap(), data2)
-    }
-
-    #[test]
-    fn test_restore_similarity_chunk_with_offset() {
-        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
-        let mut data2 = data[15..8000].to_vec();
-        data2[0] = data2[0] / 3;
-        data2[7000] = data2[7000] / 3;
-
-        let mut sbc_map = SBCMap::new(LevenshteinDecoder);
-
-        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map, data.as_slice(), 0);
-        let (_, _, sbc_hash_2) = LevenshteinEncoder::encode_delta_chunk(
-            &mut sbc_map,
-            data2.as_slice(),
-            3,
-            data.as_slice(),
-            sbc_hash.key,
-        );
-
-        assert_eq!(sbc_map.get(&sbc_hash_2).unwrap(), data2)
-    }
-
-    #[test]
-    fn test_restore_similarity_chunk_with_cyclic_shift_right() {
-        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
-        let mut data2 = data.clone();
-        data2.extend(&data[8000..]);
-
-        let mut sbc_map = SBCMap::new(LevenshteinDecoder);
-
-        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map, data.as_slice(), 0);
-        let (_, _, sbc_hash_2) = LevenshteinEncoder::encode_delta_chunk(
-            &mut sbc_map,
-            data2.as_slice(),
-            3,
-            data.as_slice(),
-            sbc_hash.key,
-        );
-        assert_ne!(data, []);
-        assert_eq!(sbc_hash_2.chunk_type, ChunkType::Delta(0));
-        assert_eq!(sbc_map.get(&sbc_hash_2).unwrap(), data2)
-    }
-    #[test]
-    fn test_restore_similarity_chunk_with_cyclic_shift_left() {
-        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
-        let mut data2 = data[..192].to_vec();
-        data2.extend(&data);
-
-        let mut sbc_map = SBCMap::new(LevenshteinDecoder);
-
-        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map, data.as_slice(), 0);
-        let (_, _, sbc_hash_2) = LevenshteinEncoder::encode_delta_chunk(
-            &mut sbc_map,
-            data2.as_slice(),
-            3,
-            data.as_slice(),
-            sbc_hash.key,
-        );
-        assert_ne!(data, []);
-        assert_eq!(sbc_hash_2.chunk_type, ChunkType::Delta(0));
-        assert_eq!(sbc_map.get(&sbc_hash_2).unwrap(), data2)
     }
 }
 
@@ -608,3 +471,197 @@ const GEAR: [u64; 256] = [
     0xfb1e6e22e08a03b3, 0xea635fdba3698dd0, 0xcf53659328503a5c, 0xcde3b31e6fd5d780,
     0x8e3e4221d3614413, 0xef14d0d86bf1a22c, 0xe1d830d3f16c5ddb, 0xaabd2b2a451504e1
 ];
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::decoders;
+    #[test]
+    fn test_restore_similarity_chunk_1_byte_diff() {
+        let mut data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let data2 = data.clone();
+        if data[15] < 255 {
+            data[15] = 255;
+        } else {
+            data[15] = 0;
+        }
+        let mut binding = SBCMap::new(decoders::LevenshteinDecoder);
+        let sbc_map = Arc::new(Mutex::new(&mut binding));
+
+        let (_, sbc_hash) =
+            encode_simple_chunk(&mut sbc_map.clone().lock().unwrap(), data.as_slice(), 0);
+        let (_, _, sbc_hash_2) = LevenshteinEncoder::encode_delta_chunk(
+            sbc_map.clone(),
+            data2.as_slice(),
+            3,
+            data.as_slice(),
+            sbc_hash.key,
+        );
+
+        assert_eq!(
+            sbc_map.clone().lock().unwrap().get(&sbc_hash_2).unwrap(),
+            data2
+        );
+    }
+
+    #[test]
+    fn test_restore_similarity_chunk_2_neighbor_byte_diff() {
+        let mut data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let data2 = data.clone();
+        if data[15] < 255 {
+            data[15] = 255;
+        } else {
+            data[15] = 0;
+        }
+        if data[16] < 255 {
+            data[16] = 255;
+        } else {
+            data[16] = 0;
+        }
+        let mut binding = SBCMap::new(decoders::LevenshteinDecoder);
+        let sbc_map = Arc::new(Mutex::new(&mut binding));
+
+        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map.lock().unwrap(), data.as_slice(), 0);
+        let (_, _, sbc_hash_2) = LevenshteinEncoder::encode_delta_chunk(
+            sbc_map.clone(),
+            data2.as_slice(),
+            3,
+            data.as_slice(),
+            sbc_hash.key,
+        );
+
+        assert_eq!(sbc_map.lock().unwrap().get(&sbc_hash_2).unwrap(), data2);
+    }
+
+    #[test]
+    fn test_restore_similarity_chunk_2_byte_diff() {
+        let mut data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let data2 = data.clone();
+        if data[15] < 255 {
+            data[15] = 255;
+        } else {
+            data[15] = 0;
+        }
+        if data[106] < 255 {
+            data[106] = 255;
+        } else {
+            data[106] = 0;
+        }
+        let mut binding = SBCMap::new(decoders::LevenshteinDecoder);
+        let sbc_map = Arc::new(Mutex::new(&mut binding));
+
+        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map.lock().unwrap(), data.as_slice(), 0);
+        let (_, _, sbc_hash_2) = LevenshteinEncoder::encode_delta_chunk(
+            sbc_map.clone(),
+            data2.as_slice(),
+            3,
+            data.as_slice(),
+            sbc_hash.key,
+        );
+
+        assert_eq!(sbc_map.lock().unwrap().get(&sbc_hash_2).unwrap(), data2);
+    }
+
+    #[test]
+    fn test_restore_similarity_chunk_with_offset_left() {
+        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let data2 = data[15..].to_vec();
+        let mut binding = SBCMap::new(decoders::LevenshteinDecoder);
+        let sbc_map = Arc::new(Mutex::new(&mut binding));
+
+        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map.lock().unwrap(), data.as_slice(), 0);
+        let (_, _, sbc_hash_2) = LevenshteinEncoder::encode_delta_chunk(
+            sbc_map.clone(),
+            data2.as_slice(),
+            3,
+            data.as_slice(),
+            sbc_hash.key,
+        );
+
+        assert_eq!(sbc_map.lock().unwrap().get(&sbc_hash_2).unwrap(), data2);
+    }
+
+    #[test]
+    fn test_restore_similarity_chunk_with_offset_right() {
+        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let data2 = data[..8000].to_vec();
+        let mut binding = SBCMap::new(decoders::LevenshteinDecoder);
+        let sbc_map = Arc::new(Mutex::new(&mut binding));
+
+        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map.lock().unwrap(), data.as_slice(), 0);
+        let (_, _, sbc_hash_2) = LevenshteinEncoder::encode_delta_chunk(
+            sbc_map.clone(),
+            data2.as_slice(),
+            3,
+            data.as_slice(),
+            sbc_hash.key,
+        );
+
+        assert_eq!(sbc_map.lock().unwrap().get(&sbc_hash_2).unwrap(), data2);
+    }
+
+    #[test]
+    fn test_restore_similarity_chunk_with_offset() {
+        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let mut data2 = data[15..8000].to_vec();
+        data2[0] /= 3;
+        data2[7000] /= 3;
+
+        let mut binding = SBCMap::new(decoders::LevenshteinDecoder);
+        let sbc_map = Arc::new(Mutex::new(&mut binding));
+
+        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map.lock().unwrap(), data.as_slice(), 0);
+        let (_, _, sbc_hash_2) = LevenshteinEncoder::encode_delta_chunk(
+            sbc_map.clone(),
+            data2.as_slice(),
+            3,
+            data.as_slice(),
+            sbc_hash.key,
+        );
+
+        assert_eq!(sbc_map.lock().unwrap().get(&sbc_hash_2).unwrap(), data2);
+    }
+
+    #[test]
+    fn test_restore_similarity_chunk_with_cyclic_shift_right() {
+        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let mut data2 = data.clone();
+        data2.extend(&data[8000..]);
+
+        let mut binding = SBCMap::new(decoders::LevenshteinDecoder);
+        let sbc_map = Arc::new(Mutex::new(&mut binding));
+
+        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map.lock().unwrap(), data.as_slice(), 0);
+        let (_, _, sbc_hash_2) = LevenshteinEncoder::encode_delta_chunk(
+            sbc_map.clone(),
+            data2.as_slice(),
+            3,
+            data.as_slice(),
+            sbc_hash.key,
+        );
+        assert_ne!(data, []);
+        assert_eq!(sbc_hash_2.chunk_type, ChunkType::Delta(0));
+        assert_eq!(sbc_map.lock().unwrap().get(&sbc_hash_2).unwrap(), data2);
+    }
+    #[test]
+    fn test_restore_similarity_chunk_with_cyclic_shift_left() {
+        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let mut data2 = data[..192].to_vec();
+        data2.extend(&data);
+
+        let mut binding = SBCMap::new(decoders::LevenshteinDecoder);
+        let sbc_map = Arc::new(Mutex::new(&mut binding));
+
+        let (_, sbc_hash) = encode_simple_chunk(&mut sbc_map.lock().unwrap(), data.as_slice(), 0);
+        let (_, _, sbc_hash_2) = LevenshteinEncoder::encode_delta_chunk(
+            sbc_map.clone(),
+            data2.as_slice(),
+            3,
+            data.as_slice(),
+            sbc_hash.key,
+        );
+        assert_ne!(data, []);
+        assert_eq!(sbc_hash_2.chunk_type, ChunkType::Delta(0));
+        assert_eq!(sbc_map.lock().unwrap().get(&sbc_hash_2).unwrap(), data2);
+    }
+}

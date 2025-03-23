@@ -27,8 +27,8 @@ mod test {
 
         let _res = fs.scrub().unwrap();
 
-        let mut handle = fs.open_file("file", SuperChunker::default()).unwrap();
-        let read = fs.read_file_complete(&mut handle).unwrap();
+        let handle = fs.open_file("file", SuperChunker::default()).unwrap();
+        let read = fs.read_file_complete(&handle).unwrap();
         assert_eq!(read, data);
     }
 
@@ -49,8 +49,8 @@ mod test {
 
         let _res = fs.scrub().unwrap();
 
-        let mut handle = fs.open_file("file", SuperChunker::default()).unwrap();
-        let read = fs.read_file_complete(&mut handle).unwrap();
+        let handle = fs.open_file("file", SuperChunker::default()).unwrap();
+        let read = fs.read_file_complete(&handle).unwrap();
         assert_eq!(read, data);
     }
     const MB: usize = 1024 * 1024;
