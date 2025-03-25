@@ -17,9 +17,14 @@ fn count_delta_chunks_with_hash<D: Decoder>(
         .lock()
         .unwrap()
         .iterator()
-        .filter(|(sbc_hash, _)| sbc_hash.key == hash)
-        .count()
-        - 1;
+        .filter(|(sbc_hash, _)| {
+            sbc_hash.key == hash
+                && match sbc_hash.chunk_type {
+                    ChunkType::Delta(_) => true,
+                    ChunkType::Simple => false,
+                }
+        })
+        .count();
     count as u16
 }
 
