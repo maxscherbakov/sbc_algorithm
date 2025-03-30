@@ -1,3 +1,6 @@
+use crate::chunkfs_sbc::{ClusterPoint, Clusters};
+use crate::clusterer::Clusterer;
+use crate::SBCHash;
 use std::collections::HashMap;
 
 const MAX_WEIGHT_EDGE: u32 = 1 << 5;
@@ -12,18 +15,36 @@ impl Vertex {
     }
 }
 
-pub(crate) struct Graph {
+pub struct Graph {
     vertices: HashMap<u32, Vertex>,
 }
-
+impl Clusterer for Graph {
+    fn clusterize<'a>(&mut self, chunk_sbc_hash: Vec<ClusterPoint<'a>>) -> Clusters<'a> {
+        let mut clusters: Clusters = HashMap::default();
+        for (sbc_hash, data_container) in chunk_sbc_hash {
+            let key = match sbc_hash {
+                SBCHash::Aronovich(key) => key,
+                SBCHash::Broder(_) => panic!("Graph Clusterer is not suitable for Broder hash"),
+            };
+            let parent_key = self.set_parent_vertex(key);
+            let cluster = clusters.entry(SBCHash::Aronovich(parent_key)).or_default();
+            cluster.push((sbc_hash, data_container))
+        }
+        clusters
+    }
+}
+impl Default for Graph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl Graph {
     pub fn new() -> Graph {
         Graph {
             vertices: HashMap::new(),
         }
     }
-
-    pub fn find_set(&mut self, hash_set: u32) -> u32 {
+    fn find_set(&mut self, hash_set: u32) -> u32 {
         let parent = self.vertices.get(&hash_set).unwrap().parent;
         if hash_set != parent {
             let parent = self.find_set(parent);
@@ -32,7 +53,9 @@ impl Graph {
         parent
     }
 
-    pub fn set_parent_vertex(&mut self, hash: u32) -> u32 {
+    /// Tries to find another hash that's closer to the given one
+    /// by less than `MAX_WEIGHT_EDGE`.
+    fn set_parent_vertex(&mut self, hash: u32) -> u32 {
         let mut min_dist = u32::MAX;
         let mut parent_hash = hash;
         for other_hash in hash - std::cmp::min(hash, MAX_WEIGHT_EDGE)

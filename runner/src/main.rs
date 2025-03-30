@@ -7,7 +7,7 @@ use chunkfs::chunkers::{
 };
 use chunkfs::hashers::Sha256Hasher;
 use chunkfs::FileSystem;
-use sbc_algorithm::{decoders, encoders};
+use sbc_algorithm::{clusterer, decoder, encoder, hasher};
 use sbc_algorithm::{SBCMap, SBCScrubber};
 use std::collections::HashMap;
 use std::fs;
@@ -27,8 +27,12 @@ fn main() -> io::Result<()> {
     let chunk_size = SizeParams::new(2 * 1024, 8 * 1024, 16 * 1024);
     let mut fs = FileSystem::new_with_scrubber(
         HashMap::default(),
-        SBCMap::new(decoders::GdeltaDecoder),
-        Box::new(SBCScrubber::new(encoders::GdeltaEncoder)),
+        SBCMap::new(decoder::GdeltaDecoder),
+        Box::new(SBCScrubber::new(
+            hasher::AronovichHasher,
+            clusterer::Graph::new(),
+            encoder::GdeltaEncoder,
+        )),
         Sha256Hasher::default(),
     );
     let mut handle = fs.create_file("file".to_string(), SuperChunker::new(chunk_size))?;

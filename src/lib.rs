@@ -1,30 +1,44 @@
-use crate::decoders::Decoder;
+use crate::decoder::Decoder;
+use crate::SBCHash::Aronovich;
 pub use chunkfs_sbc::SBCScrubber;
-pub use hash_functions::sbc_hashing;
 use std::collections::HashMap;
 
 mod chunkfs_sbc;
-pub mod decoders;
-pub mod encoders;
-mod graph;
-mod hash_functions;
-mod levenshtein_functions;
+pub mod clusterer;
+pub mod decoder;
+pub mod encoder;
+pub mod hasher;
 
 #[derive(Hash, PartialEq, Eq, Clone, Default, Debug)]
 enum ChunkType {
-    Delta(u16),
+    Delta {
+        parent_hash: SBCHash,
+        number: u16,
+    },
     #[default]
     Simple,
 }
 
+#[derive(Hash, PartialEq, Eq, Clone, Debug)]
+pub enum SBCHash {
+    Aronovich(u32),
+    Broder(u16),
+}
+
+impl Default for SBCHash {
+    fn default() -> Self {
+        Aronovich(u32::default())
+    }
+}
+
 #[derive(Hash, PartialEq, Eq, Clone, Default)]
-pub struct SBCHash {
-    key: u32,
+pub struct SBCKey {
+    hash: SBCHash,
     chunk_type: ChunkType,
 }
 
 pub struct SBCMap<D: Decoder> {
-    sbc_hashmap: HashMap<SBCHash, Vec<u8>>,
+    sbc_hashmap: HashMap<SBCKey, Vec<u8>>,
     decoder: D,
 }
 
@@ -36,9 +50,3 @@ impl<D: Decoder> SBCMap<D> {
         }
     }
 }
-
-// impl Default for SBCMap {
-//     fn default() -> Self {
-//         Self::new()
-//     }
-// }

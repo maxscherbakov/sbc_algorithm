@@ -1,7 +1,8 @@
-use crate::decoders::Decoder;
-use crate::encoders::Encoder;
-use crate::graph::Graph;
-use crate::{hash_functions, ChunkType, SBCHash, SBCMap};
+use crate::clusterer::Clusterer;
+use crate::decoder::Decoder;
+use crate::encoder::Encoder;
+use crate::hasher::Hasher;
+use crate::{ChunkType, SBCHash, SBCKey, SBCMap};
 use chunkfs::{
     ChunkHash, Data, DataContainer, Database, IterableDatabase, Scrub, ScrubMeasurements,
 };
@@ -10,34 +11,35 @@ use rayon::ThreadPoolBuilder;
 use std::collections::HashMap;
 use std::io;
 use std::io::{Error, ErrorKind};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::Instant;
 
 const NUM_THREADS_FOR_HASHING: usize = 6;
 
-pub type Clusters<'a> = HashMap<u32, Vec<(u32, &'a mut DataContainer<SBCHash>)>>;
+pub type ClusterPoint<'a> = (SBCHash, &'a mut &'a mut DataContainer<SBCKey>);
+pub type Clusters<'a> = HashMap<SBCHash, Vec<ClusterPoint<'a>>>;
 
-impl<D: Decoder> Database<SBCHash, Vec<u8>> for SBCMap<D> {
-    fn insert(&mut self, sbc_hash: SBCHash, chunk: Vec<u8>) -> io::Result<()> {
+impl<D: Decoder> Database<SBCKey, Vec<u8>> for SBCMap<D> {
+    fn insert(&mut self, sbc_hash: SBCKey, chunk: Vec<u8>) -> io::Result<()> {
         self.sbc_hashmap.insert(sbc_hash, chunk);
         Ok(())
     }
 
-    fn get(&self, sbc_hash: &SBCHash) -> io::Result<Vec<u8>> {
+    fn get(&self, sbc_hash: &SBCKey) -> io::Result<Vec<u8>> {
         let sbc_value = self
             .sbc_hashmap
             .get(sbc_hash)
             .ok_or(Error::new(ErrorKind::NotFound, "!"))?;
-        let chunk = match sbc_hash.chunk_type {
-            ChunkType::Simple {} => sbc_value.clone(),
-            ChunkType::Delta(_) => {
-                let mut buf = [0u8; 4];
-                buf.copy_from_slice(&sbc_value[..4]);
 
-                let parent_hash = u32::from_be_bytes(buf);
+        let chunk = match &sbc_hash.chunk_type {
+            ChunkType::Simple {} => sbc_value.clone(),
+            ChunkType::Delta {
+                parent_hash,
+                number: _,
+            } => {
                 let parent_data = self
-                    .get(&SBCHash {
-                        key: parent_hash,
+                    .get(&SBCKey {
+                        hash: parent_hash.clone(),
                         chunk_type: ChunkType::Simple,
                     })
                     .unwrap();
@@ -48,20 +50,16 @@ impl<D: Decoder> Database<SBCHash, Vec<u8>> for SBCMap<D> {
         Ok(chunk)
     }
 
-    // fn remove(&mut self, sbc_hash: &SBCHash) {
-    //     self.sbc_hashmap.remove(sbc_hash);
-    // }
-
-    fn contains(&self, key: &SBCHash) -> bool {
+    fn contains(&self, key: &SBCKey) -> bool {
         self.sbc_hashmap.contains_key(key)
     }
 }
 
-impl<D: Decoder> IterableDatabase<SBCHash, Vec<u8>> for SBCMap<D> {
-    fn iterator(&self) -> Box<dyn Iterator<Item = (&SBCHash, &Vec<u8>)> + '_> {
+impl<D: Decoder> IterableDatabase<SBCKey, Vec<u8>> for SBCMap<D> {
+    fn iterator(&self) -> Box<dyn Iterator<Item = (&SBCKey, &Vec<u8>)> + '_> {
         Box::new(self.sbc_hashmap.iter())
     }
-    fn iterator_mut(&mut self) -> Box<dyn Iterator<Item = (&SBCHash, &mut Vec<u8>)> + '_> {
+    fn iterator_mut(&mut self) -> Box<dyn Iterator<Item = (&SBCKey, &mut Vec<u8>)> + '_> {
         Box::new(self.sbc_hashmap.iter_mut())
     }
 
@@ -71,28 +69,38 @@ impl<D: Decoder> IterableDatabase<SBCHash, Vec<u8>> for SBCMap<D> {
     }
 }
 
-pub struct SBCScrubber<E>
+pub struct SBCScrubber<H, C, E>
 where
+    H: Hasher,
+    C: Clusterer,
     E: Encoder,
 {
-    graph: Arc<Mutex<Graph>>,
+    hasher: H,
+    clusterer: C,
     encoder: E,
 }
 
-impl<E: Encoder> SBCScrubber<E> {
-    pub fn new(_encoder: E) -> SBCScrubber<E> {
+impl<H, C, E> SBCScrubber<H, C, E>
+where
+    H: Hasher,
+    C: Clusterer,
+    E: Encoder,
+{
+    pub fn new(hasher: H, clusterer: C, encoder: E) -> SBCScrubber<H, C, E> {
         SBCScrubber {
-            graph: Arc::new(Mutex::new(Graph::new())),
-            encoder: _encoder,
+            hasher,
+            clusterer,
+            encoder,
         }
     }
 }
 
-impl<Hash, B, D, E> Scrub<Hash, B, SBCHash, SBCMap<D>> for SBCScrubber<E>
+impl<Hash, B, D, H, C, E> Scrub<Hash, B, SBCKey, SBCMap<D>> for SBCScrubber<H, C, E>
 where
     Hash: ChunkHash,
-    for<'data> B:
-        IterableDatabase<Hash, DataContainer<SBCHash>> + IntoParallelRefMutIterator<'data>,
+    for<'data> B: IterableDatabase<Hash, DataContainer<SBCKey>> + IntoParallelRefMutIterator<'data>,
+    H: Hasher + Sync,
+    C: Clusterer,
     D: Decoder + Send,
     E: Encoder + Sync,
 {
@@ -109,21 +117,18 @@ where
             .build()
             .unwrap();
 
-        let clusters_ref: Mutex<Clusters> = Mutex::new(HashMap::default());
+        let mut mut_refs_database: Vec<_> = database.values_mut().collect();
+        let chunk_sbc_hash: Mutex<Vec<_>> = Mutex::default();
 
-        let mut mut_refs_database: Vec<&mut DataContainer<SBCHash>> =
-            database.values_mut().collect();
-
+        // 1. hashing
         let time_start = Instant::now();
         pool.install(|| {
             mut_refs_database.par_iter_mut().for_each(|data_container| {
                 match data_container.extract() {
                     Data::Chunk(data) => {
-                        let sbc_hash = hash_functions::sbc_hashing(data);
-                        let parent_hash = self.graph.lock().unwrap().set_parent_vertex(sbc_hash);
-                        let mut clusters_lock = clusters_ref.lock().unwrap();
-                        let cluster = clusters_lock.entry(parent_hash).or_default();
-                        cluster.push((sbc_hash, data_container));
+                        let sbc_hash = self.hasher.calculate_hash(data);
+                        let mut chunk_sbc_hash_lock = chunk_sbc_hash.lock().unwrap();
+                        chunk_sbc_hash_lock.push((sbc_hash, data_container));
                     }
                     Data::TargetChunk(_) => {
                         todo!()
@@ -134,9 +139,19 @@ where
         let time_hashing = time_start.elapsed();
         println!("time for hashing: {time_hashing:?}");
 
-        let (data_left, processed_data) = self
-            .encoder
-            .encode_clusters(&mut clusters_ref.into_inner().unwrap(), target_map);
+        // 2. clusterize
+        let time_clusterize_start = time_start.elapsed();
+        let mut clusters = self
+            .clusterer
+            .clusterize(chunk_sbc_hash.into_inner().unwrap());
+        let time_clusterize = time_start.elapsed() - time_clusterize_start;
+        println!("time for clusterize: {time_clusterize:?}");
+
+        // 3. encode
+        let time_encode_start = time_start.elapsed();
+        let (data_left, processed_data) = self.encoder.encode_clusters(&mut clusters, target_map);
+        let time_encode = time_start.elapsed() - time_encode_start;
+        println!("time for encode: {time_encode:?}");
 
         let running_time = time_start.elapsed();
 

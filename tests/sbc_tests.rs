@@ -5,9 +5,9 @@ mod test {
     use chunkfs::chunkers::SuperChunker;
     use chunkfs::hashers::Sha256Hasher;
     use chunkfs::FileSystem;
-    use sbc_algorithm::decoders::{GdeltaDecoder, LevenshteinDecoder};
-    use sbc_algorithm::encoders::{GdeltaEncoder, LevenshteinEncoder};
-    use sbc_algorithm::{SBCMap, SBCScrubber};
+    use sbc_algorithm::decoder::{GdeltaDecoder, LevenshteinDecoder};
+    use sbc_algorithm::encoder::{GdeltaEncoder, LevenshteinEncoder};
+    use sbc_algorithm::{clusterer, hasher, SBCMap, SBCScrubber};
     use std::collections::HashMap;
 
     #[test]
@@ -15,7 +15,11 @@ mod test {
         let mut fs = FileSystem::new_with_scrubber(
             HashMap::default(),
             SBCMap::new(LevenshteinDecoder),
-            Box::new(SBCScrubber::new(LevenshteinEncoder)),
+            Box::new(SBCScrubber::new(
+                hasher::AronovichHasher,
+                clusterer::Graph::new(),
+                LevenshteinEncoder,
+            )),
             Sha256Hasher::default(),
         );
         let mut handle = fs
@@ -37,7 +41,11 @@ mod test {
         let mut fs = FileSystem::new_with_scrubber(
             HashMap::default(),
             SBCMap::new(GdeltaDecoder),
-            Box::new(SBCScrubber::new(GdeltaEncoder)),
+            Box::new(SBCScrubber::new(
+                hasher::AronovichHasher,
+                clusterer::Graph::default(),
+                GdeltaEncoder,
+            )),
             Sha256Hasher::default(),
         );
         let mut handle = fs

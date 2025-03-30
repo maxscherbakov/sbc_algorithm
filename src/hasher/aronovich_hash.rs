@@ -1,3 +1,5 @@
+use crate::hasher::Hasher;
+use crate::SBCHash;
 use std::collections::HashMap;
 use std::ops::Range;
 
@@ -8,6 +10,30 @@ const BLOCKS_IN_F_SPECTRUM_COUNT: usize = 16;
 const SHIFT_FOR_PAIR: u8 = 3;
 const BLOCKS_FOR_P_SPECTRUM_INDEXES: Range<usize> = 5..9;
 const MIN_FREQUENCY_FOR_BYTE: u32 = 50;
+
+pub struct AronovichHasher;
+impl Hasher for AronovichHasher {
+    fn calculate_hash(&self, chunk_data: &[u8]) -> SBCHash {
+        let mut byte_value_byte_frequency = HashMap::new();
+        let mut pair_value_pair_frequency = HashMap::new();
+        let mut last_byte = chunk_data[0];
+        byte_value_byte_frequency.insert(last_byte, 1u32);
+        for byte in &chunk_data[1..] {
+            let byte_count = byte_value_byte_frequency.entry(*byte).or_insert(0);
+            *byte_count += 1;
+
+            let pair_count = pair_value_pair_frequency
+                .entry((last_byte, *byte))
+                .or_insert(0u32);
+            *pair_count += 1;
+            last_byte = *byte;
+        }
+
+        let c_f_hash = processing_of_c_f_spectrum(byte_value_byte_frequency);
+        let p_hash = processing_of_p_spectrum(pair_value_pair_frequency);
+        SBCHash::Aronovich(c_f_hash ^ p_hash)
+    }
+}
 
 fn processing_of_c_spectrum(c_f_spectrum: &[(&u8, &u32)]) -> u32 {
     let mut spaces_in_c_spectrum = Vec::new();
@@ -127,27 +153,6 @@ fn processing_of_c_f_spectrum(byte_value_byte_frequency: HashMap<u8, u32>) -> u3
     c_hash ^ f_hash
 }
 
-pub fn sbc_hashing(data: &[u8]) -> u32 {
-    let mut byte_value_byte_frequency = HashMap::new();
-    let mut pair_value_pair_frequency = HashMap::new();
-    let mut last_byte = data[0];
-    byte_value_byte_frequency.insert(last_byte, 1u32);
-    for byte in &data[1..] {
-        let byte_count = byte_value_byte_frequency.entry(*byte).or_insert(0);
-        *byte_count += 1;
-
-        let pair_count = pair_value_pair_frequency
-            .entry((last_byte, *byte))
-            .or_insert(0u32);
-        *pair_count += 1;
-        last_byte = *byte;
-    }
-
-    let c_f_hash = processing_of_c_f_spectrum(byte_value_byte_frequency);
-    let p_hash = processing_of_p_spectrum(pair_value_pair_frequency);
-    c_f_hash ^ p_hash
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -249,8 +254,8 @@ mod test {
     #[test]
     fn test_hash_for_eq_chunks() {
         let chunk: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
-        let hash = sbc_hashing(chunk.as_slice());
-        let eq_hash = sbc_hashing(chunk.as_slice());
+        let hash = AronovichHasher.calculate_hash(chunk.as_slice());
+        let eq_hash = AronovichHasher.calculate_hash(chunk.as_slice());
         assert_eq!(hash, eq_hash)
     }
 }
