@@ -63,7 +63,7 @@ pub trait Encoder {
         let processed_data = Mutex::new(0);
         let target_map_ref = Arc::new(Mutex::new(target_map));
         pool.install(|| {
-            let _ = clusters.par_iter_mut().for_each(|(parent_hash, cluster)| {
+            clusters.par_iter_mut().for_each(|(parent_hash, cluster)| {
                 let data_analyse = self.encode_cluster(
                     target_map_ref.clone(),
                     cluster.as_mut_slice(),
@@ -104,7 +104,10 @@ fn count_delta_chunks_with_hash<D: Decoder, Hash: SBCHash>(
     count as u16
 }
 
-fn find_empty_cell<D: Decoder, Hash: SBCHash>(target_map: &MutexGuard<&mut SBCMap<D, Hash>>, hash: &Hash) -> Hash {
+fn find_empty_cell<D: Decoder, Hash: SBCHash>(
+    target_map: &MutexGuard<&mut SBCMap<D, Hash>>,
+    hash: &Hash,
+) -> Hash {
     let mut left = hash.clone();
     let mut right = hash.next_hash();
     loop {

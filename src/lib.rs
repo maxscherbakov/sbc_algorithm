@@ -1,7 +1,7 @@
 use crate::decoder::Decoder;
 pub use chunkfs_sbc::SBCScrubber;
-use std::collections::HashMap;
 use hasher::SBCHash;
+use std::collections::HashMap;
 
 mod chunkfs_sbc;
 pub mod clusterer;
@@ -18,8 +18,6 @@ enum ChunkType<Hash: SBCHash> {
     #[default]
     Simple,
 }
-
-
 
 #[derive(Hash, PartialEq, Eq, Clone, Default)]
 pub struct SBCKey<H: SBCHash> {

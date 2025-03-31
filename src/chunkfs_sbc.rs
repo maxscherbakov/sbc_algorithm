@@ -16,8 +16,8 @@ use std::time::Instant;
 
 const NUM_THREADS_FOR_HASHING: usize = 6;
 
-pub type ClusterPoint<'a, Hash: SBCHash> = (Hash, &'a mut &'a mut DataContainer<SBCKey<Hash>>);
-pub type Clusters<'a, Hash: SBCHash> = HashMap<Hash, Vec<ClusterPoint<'a, Hash>>>;
+pub type ClusterPoint<'a, Hash> = (Hash, &'a mut &'a mut DataContainer<SBCKey<Hash>>);
+pub type Clusters<'a, Hash> = HashMap<Hash, Vec<ClusterPoint<'a, Hash>>>;
 
 impl<D: Decoder, Hash: SBCHash> Database<SBCKey<Hash>, Vec<u8>> for SBCMap<D, Hash> {
     fn insert(&mut self, sbc_hash: SBCKey<Hash>, chunk: Vec<u8>) -> io::Result<()> {
@@ -72,7 +72,7 @@ impl<D: Decoder, Hash: SBCHash> IterableDatabase<SBCKey<Hash>, Vec<u8>> for SBCM
 pub struct SBCScrubber<Hash, H, C, E>
 where
     Hash: SBCHash,
-    H : Hasher<Hash = Hash>,
+    H: Hasher<Hash = Hash>,
     C: Clusterer<Hash>,
     E: Encoder,
 {
@@ -97,11 +97,13 @@ where
     }
 }
 
-impl<CDCHash, B, D, H, C, E, Hash> Scrub<CDCHash, B, SBCKey<Hash>, SBCMap<D, Hash>> for SBCScrubber<Hash, H, C, E>
+impl<CDCHash, B, D, H, C, E, Hash> Scrub<CDCHash, B, SBCKey<Hash>, SBCMap<D, Hash>>
+    for SBCScrubber<Hash, H, C, E>
 where
     CDCHash: ChunkHash,
-    for<'data> B: IterableDatabase<CDCHash, DataContainer<SBCKey<Hash>>> + IntoParallelRefMutIterator<'data>,
-    H : Hasher<Hash = Hash> + Sync,
+    for<'data> B:
+        IterableDatabase<CDCHash, DataContainer<SBCKey<Hash>>> + IntoParallelRefMutIterator<'data>,
+    H: Hasher<Hash = Hash> + Sync,
     C: Clusterer<Hash>,
     D: Decoder + Send,
     E: Encoder + Sync,

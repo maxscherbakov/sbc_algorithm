@@ -236,8 +236,8 @@ fn encode_delta_action(action: Action, index: usize, byte_value: u8) -> u32 {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{AronovichHash, decoder};
-    use crate::SBCHash::Aronovich;
+    use crate::decoder;
+    use crate::hasher::AronovichHash;
 
     #[test]
     fn test_restore_similarity_chunk_1_byte_diff() {
@@ -365,11 +365,15 @@ mod test {
     fn create_map_and_key<'a>(
         data: &'a [u8],
         data2: &'a [u8],
-    ) -> (SBCMap<decoder::LevenshteinDecoder, AronovichHash>, SBCKey<AronovichHash>) {
+    ) -> (
+        SBCMap<decoder::LevenshteinDecoder, AronovichHash>,
+        SBCKey<AronovichHash>,
+    ) {
         let mut binding = SBCMap::new(decoder::LevenshteinDecoder);
         let sbc_map = Arc::new(Mutex::new(&mut binding));
 
-        let (_, sbc_key) = encode_simple_chunk(&mut sbc_map.lock().unwrap(), data, AronovichHash::new(0));
+        let (_, sbc_key) =
+            encode_simple_chunk(&mut sbc_map.lock().unwrap(), data, AronovichHash::new(0));
         let (_, _, sbc_key_2) = LevenshteinEncoder::encode_delta_chunk(
             sbc_map.clone(),
             data2,

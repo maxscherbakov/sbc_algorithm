@@ -1,5 +1,5 @@
 use crate::hasher::Hasher;
-use crate::{SBCHash};
+use crate::SBCHash;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::ops::Range;
@@ -12,10 +12,10 @@ const SHIFT_FOR_PAIR: u8 = 3;
 const BLOCKS_FOR_P_SPECTRUM_INDEXES: Range<usize> = 5..9;
 const MIN_FREQUENCY_FOR_BYTE: u32 = 50;
 
+#[derive(Debug)]
 pub struct AronovichHash {
-    hash: u32
+    hash: u32,
 }
-
 
 impl Hash for AronovichHash {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -44,20 +44,18 @@ impl Default for AronovichHash {
 }
 
 impl SBCHash for AronovichHash {
-
     fn new(hash: u32) -> Self {
-        AronovichHash {hash}
+        AronovichHash { hash }
     }
     fn next_hash(&self) -> Self {
         AronovichHash {
-            hash:
-            self.hash.saturating_add(1)
+            hash: self.hash.saturating_add(1),
         }
     }
 
     fn last_hash(&self) -> Self {
-        AronovichHash {hash:
-        self.hash.saturating_sub(1)
+        AronovichHash {
+            hash: self.hash.saturating_sub(1),
         }
     }
 
