@@ -1,6 +1,7 @@
 use crate::hasher::Hasher;
-use crate::SBCHash;
+use crate::{SBCHash};
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::ops::Range;
 
 const BLOCKS_IN_C_SPECTRUM_COUNT: usize = 8;
@@ -11,9 +12,65 @@ const SHIFT_FOR_PAIR: u8 = 3;
 const BLOCKS_FOR_P_SPECTRUM_INDEXES: Range<usize> = 5..9;
 const MIN_FREQUENCY_FOR_BYTE: u32 = 50;
 
+pub struct AronovichHash {
+    hash: u32
+}
+
+
+impl Hash for AronovichHash {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash.hash(state)
+    }
+}
+
+impl Clone for AronovichHash {
+    fn clone(&self) -> Self {
+        AronovichHash::new(self.hash)
+    }
+}
+
+impl Eq for AronovichHash {}
+
+impl PartialEq<Self> for AronovichHash {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash == other.hash
+    }
+}
+
+impl Default for AronovichHash {
+    fn default() -> Self {
+        Self::new(u32::default())
+    }
+}
+
+impl SBCHash for AronovichHash {
+
+    fn new(hash: u32) -> Self {
+        AronovichHash {hash}
+    }
+    fn next_hash(&self) -> Self {
+        AronovichHash {
+            hash:
+            self.hash.saturating_add(1)
+        }
+    }
+
+    fn last_hash(&self) -> Self {
+        AronovichHash {hash:
+        self.hash.saturating_sub(1)
+        }
+    }
+
+    fn get_key_for_graph_clusterer(&self) -> u32 {
+        self.hash
+    }
+}
 pub struct AronovichHasher;
+
 impl Hasher for AronovichHasher {
-    fn calculate_hash(&self, chunk_data: &[u8]) -> SBCHash {
+    type Hash = AronovichHash;
+
+    fn calculate_hash(&self, chunk_data: &[u8]) -> AronovichHash {
         let mut byte_value_byte_frequency = HashMap::new();
         let mut pair_value_pair_frequency = HashMap::new();
         let mut last_byte = chunk_data[0];
@@ -31,7 +88,7 @@ impl Hasher for AronovichHasher {
 
         let c_f_hash = processing_of_c_f_spectrum(byte_value_byte_frequency);
         let p_hash = processing_of_p_spectrum(pair_value_pair_frequency);
-        SBCHash::Aronovich(c_f_hash ^ p_hash)
+        AronovichHash::new(c_f_hash ^ p_hash)
     }
 }
 

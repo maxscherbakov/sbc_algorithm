@@ -16,16 +16,16 @@ use std::time::Instant;
 
 const NUM_THREADS_FOR_HASHING: usize = 6;
 
-pub type ClusterPoint<'a> = (SBCHash, &'a mut &'a mut DataContainer<SBCKey>);
-pub type Clusters<'a> = HashMap<SBCHash, Vec<ClusterPoint<'a>>>;
+pub type ClusterPoint<'a, Hash: SBCHash> = (Hash, &'a mut &'a mut DataContainer<SBCKey<Hash>>);
+pub type Clusters<'a, Hash: SBCHash> = HashMap<Hash, Vec<ClusterPoint<'a, Hash>>>;
 
-impl<D: Decoder> Database<SBCKey, Vec<u8>> for SBCMap<D> {
-    fn insert(&mut self, sbc_hash: SBCKey, chunk: Vec<u8>) -> io::Result<()> {
+impl<D: Decoder, Hash: SBCHash> Database<SBCKey<Hash>, Vec<u8>> for SBCMap<D, Hash> {
+    fn insert(&mut self, sbc_hash: SBCKey<Hash>, chunk: Vec<u8>) -> io::Result<()> {
         self.sbc_hashmap.insert(sbc_hash, chunk);
         Ok(())
     }
 
-    fn get(&self, sbc_hash: &SBCKey) -> io::Result<Vec<u8>> {
+    fn get(&self, sbc_hash: &SBCKey<Hash>) -> io::Result<Vec<u8>> {
         let sbc_value = self
             .sbc_hashmap
             .get(sbc_hash)
@@ -50,16 +50,16 @@ impl<D: Decoder> Database<SBCKey, Vec<u8>> for SBCMap<D> {
         Ok(chunk)
     }
 
-    fn contains(&self, key: &SBCKey) -> bool {
+    fn contains(&self, key: &SBCKey<Hash>) -> bool {
         self.sbc_hashmap.contains_key(key)
     }
 }
 
-impl<D: Decoder> IterableDatabase<SBCKey, Vec<u8>> for SBCMap<D> {
-    fn iterator(&self) -> Box<dyn Iterator<Item = (&SBCKey, &Vec<u8>)> + '_> {
+impl<D: Decoder, Hash: SBCHash> IterableDatabase<SBCKey<Hash>, Vec<u8>> for SBCMap<D, Hash> {
+    fn iterator(&self) -> Box<dyn Iterator<Item = (&SBCKey<Hash>, &Vec<u8>)> + '_> {
         Box::new(self.sbc_hashmap.iter())
     }
-    fn iterator_mut(&mut self) -> Box<dyn Iterator<Item = (&SBCKey, &mut Vec<u8>)> + '_> {
+    fn iterator_mut(&mut self) -> Box<dyn Iterator<Item = (&SBCKey<Hash>, &mut Vec<u8>)> + '_> {
         Box::new(self.sbc_hashmap.iter_mut())
     }
 
@@ -69,10 +69,11 @@ impl<D: Decoder> IterableDatabase<SBCKey, Vec<u8>> for SBCMap<D> {
     }
 }
 
-pub struct SBCScrubber<H, C, E>
+pub struct SBCScrubber<Hash, H, C, E>
 where
-    H: Hasher,
-    C: Clusterer,
+    Hash: SBCHash,
+    H : Hasher<Hash = Hash>,
+    C: Clusterer<Hash>,
     E: Encoder,
 {
     hasher: H,
@@ -80,13 +81,14 @@ where
     encoder: E,
 }
 
-impl<H, C, E> SBCScrubber<H, C, E>
+impl<Hash, H, C, E> SBCScrubber<Hash, H, C, E>
 where
-    H: Hasher,
-    C: Clusterer,
+    Hash: SBCHash,
+    H: Hasher<Hash = Hash>,
+    C: Clusterer<Hash>,
     E: Encoder,
 {
-    pub fn new(hasher: H, clusterer: C, encoder: E) -> SBCScrubber<H, C, E> {
+    pub fn new(hasher: H, clusterer: C, encoder: E) -> SBCScrubber<Hash, H, C, E> {
         SBCScrubber {
             hasher,
             clusterer,
@@ -95,22 +97,23 @@ where
     }
 }
 
-impl<Hash, B, D, H, C, E> Scrub<Hash, B, SBCKey, SBCMap<D>> for SBCScrubber<H, C, E>
+impl<CDCHash, B, D, H, C, E, Hash> Scrub<CDCHash, B, SBCKey<Hash>, SBCMap<D, Hash>> for SBCScrubber<Hash, H, C, E>
 where
-    Hash: ChunkHash,
-    for<'data> B: IterableDatabase<Hash, DataContainer<SBCKey>> + IntoParallelRefMutIterator<'data>,
-    H: Hasher + Sync,
-    C: Clusterer,
+    CDCHash: ChunkHash,
+    for<'data> B: IterableDatabase<CDCHash, DataContainer<SBCKey<Hash>>> + IntoParallelRefMutIterator<'data>,
+    H : Hasher<Hash = Hash> + Sync,
+    C: Clusterer<Hash>,
     D: Decoder + Send,
     E: Encoder + Sync,
+    Hash: SBCHash,
 {
     fn scrub<'a>(
         &mut self,
         database: &mut B,
-        target_map: &mut SBCMap<D>,
+        target_map: &mut SBCMap<D, Hash>,
     ) -> io::Result<ScrubMeasurements>
     where
-        Hash: 'a,
+        CDCHash: 'a,
     {
         let pool = ThreadPoolBuilder::new()
             .num_threads(NUM_THREADS_FOR_HASHING)
@@ -126,7 +129,7 @@ where
             mut_refs_database.par_iter_mut().for_each(|data_container| {
                 match data_container.extract() {
                     Data::Chunk(data) => {
-                        let sbc_hash = self.hasher.calculate_hash(data);
+                        let sbc_hash = self.hasher.calculate_hash(data.as_slice());
                         let mut chunk_sbc_hash_lock = chunk_sbc_hash.lock().unwrap();
                         chunk_sbc_hash_lock.push((sbc_hash, data_container));
                     }

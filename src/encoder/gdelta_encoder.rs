@@ -11,14 +11,14 @@ use std::sync::{Arc, Mutex};
 pub struct GdeltaEncoder;
 
 impl GdeltaEncoder {
-    fn encode_delta_chunk<D: Decoder>(
-        target_map: Arc<Mutex<&mut SBCMap<D>>>,
+    fn encode_delta_chunk<D: Decoder, Hash: SBCHash>(
+        target_map: Arc<Mutex<&mut SBCMap<D, Hash>>>,
         chunk_data: &[u8],
-        hash: SBCHash,
+        hash: Hash,
         parent_data: &[u8],
         word_hash_offsets: &HashMap<u64, usize>,
-        parent_hash: SBCHash,
-    ) -> (usize, usize, SBCKey) {
+        parent_hash: Hash,
+    ) -> (usize, usize, SBCKey<Hash>) {
         let mut delta_code = Vec::new();
 
         let mut anchor: usize = 0;
@@ -98,11 +98,11 @@ impl GdeltaEncoder {
 }
 
 impl Encoder for GdeltaEncoder {
-    fn encode_cluster<D: Decoder>(
+    fn encode_cluster<D: Decoder, Hash: SBCHash>(
         &self,
-        target_map: Arc<Mutex<&mut SBCMap<D>>>,
-        cluster: &mut [ClusterPoint],
-        parent_hash: SBCHash,
+        target_map: Arc<Mutex<&mut SBCMap<D, Hash>>>,
+        cluster: &mut [ClusterPoint<Hash>],
+        parent_hash: Hash,
     ) -> (usize, usize) {
         let mut processed_data = 0;
         let parent_chunk = get_parent_data(target_map.clone(), parent_hash.clone(), cluster);

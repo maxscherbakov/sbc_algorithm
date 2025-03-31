@@ -28,11 +28,11 @@ pub trait Encoder {
     /// A tuple containing:
     /// - `usize`: Amount of unprocessed data remaining in cluster
     /// - `usize`: Amount of data successfully processed and encoded
-    fn encode_cluster<D: Decoder>(
+    fn encode_cluster<D: Decoder, Hash: SBCHash>(
         &self,
-        target_map: Arc<Mutex<&mut SBCMap<D>>>,
-        cluster: &mut [ClusterPoint],
-        parent_hash: SBCHash,
+        target_map: Arc<Mutex<&mut SBCMap<D, Hash>>>,
+        cluster: &mut [ClusterPoint<Hash>],
+        parent_hash: Hash,
     ) -> (usize, usize);
 
     /// Batch processes multiple clusters through the encoding pipeline.
@@ -49,10 +49,10 @@ pub trait Encoder {
     /// # Note
     /// Provides default implementation that iterates through all clusters,
     /// but can be overridden for optimized batch processing strategies.
-    fn encode_clusters<D: Decoder + Send>(
+    fn encode_clusters<D: Decoder + Send, Hash: SBCHash>(
         &self,
-        clusters: &mut Clusters,
-        target_map: &mut SBCMap<D>,
+        clusters: &mut Clusters<Hash>,
+        target_map: &mut SBCMap<D, Hash>,
     ) -> (usize, usize)
     where
         Self: Sync,
@@ -63,7 +63,7 @@ pub trait Encoder {
         let processed_data = Mutex::new(0);
         let target_map_ref = Arc::new(Mutex::new(target_map));
         pool.install(|| {
-            clusters.par_iter_mut().for_each(|(parent_hash, cluster)| {
+            let _ = clusters.par_iter_mut().for_each(|(parent_hash, cluster)| {
                 let data_analyse = self.encode_cluster(
                     target_map_ref.clone(),
                     cluster.as_mut_slice(),
@@ -84,9 +84,9 @@ pub trait Encoder {
     }
 }
 
-fn count_delta_chunks_with_hash<D: Decoder>(
-    target_map: &MutexGuard<&mut SBCMap<D>>,
-    hash: &SBCHash,
+fn count_delta_chunks_with_hash<D: Decoder, Hash: SBCHash>(
+    target_map: &MutexGuard<&mut SBCMap<D, Hash>>,
+    hash: &Hash,
 ) -> u16 {
     let count = target_map
         .iterator()
@@ -104,15 +104,15 @@ fn count_delta_chunks_with_hash<D: Decoder>(
     count as u16
 }
 
-fn find_empty_cell<D: Decoder>(target_map: &MutexGuard<&mut SBCMap<D>>, hash: &SBCHash) -> SBCHash {
+fn find_empty_cell<D: Decoder, Hash: SBCHash>(target_map: &MutexGuard<&mut SBCMap<D, Hash>>, hash: &Hash) -> Hash {
     let mut left = hash.clone();
-    let mut right = next_hash(hash);
+    let mut right = hash.next_hash();
     loop {
         if target_map.contains(&SBCKey {
             hash: left.clone(),
             chunk_type: ChunkType::Simple,
         }) {
-            left = last_hash(left);
+            left = left.last_hash();
         } else {
             return left;
         }
@@ -121,32 +121,18 @@ fn find_empty_cell<D: Decoder>(target_map: &MutexGuard<&mut SBCMap<D>>, hash: &S
             hash: right.clone(),
             chunk_type: ChunkType::Simple,
         }) {
-            right = next_hash(&right);
+            right = right.next_hash();
         } else {
             return right;
         }
     }
 }
 
-fn last_hash(sbc_hash: SBCHash) -> SBCHash {
-    match sbc_hash {
-        SBCHash::Aronovich(key) => SBCHash::Aronovich(key.saturating_sub(1)),
-        SBCHash::Broder(_) => todo!(),
-    }
-}
-
-fn next_hash(sbc_hash: &SBCHash) -> SBCHash {
-    match sbc_hash {
-        SBCHash::Aronovich(key) => SBCHash::Aronovich(key.saturating_add(1)),
-        SBCHash::Broder(_) => todo!(),
-    }
-}
-
-fn encode_simple_chunk<D: Decoder>(
-    target_map: &mut MutexGuard<&mut SBCMap<D>>,
+fn encode_simple_chunk<D: Decoder, Hash: SBCHash>(
+    target_map: &mut MutexGuard<&mut SBCMap<D, Hash>>,
     data: &[u8],
-    hash: SBCHash,
-) -> (usize, SBCKey) {
+    hash: Hash,
+) -> (usize, SBCKey<Hash>) {
     let sbc_hash = SBCKey {
         hash: find_empty_cell(target_map, &hash),
         chunk_type: ChunkType::Simple,
@@ -163,10 +149,10 @@ struct ParentChunkInCluster {
     data_left: usize,
 }
 
-fn get_parent_data<D: Decoder>(
-    target_map: Arc<Mutex<&mut SBCMap<D>>>,
-    parent_hash: SBCHash,
-    cluster: &mut [ClusterPoint],
+fn get_parent_data<D: Decoder, Hash: SBCHash>(
+    target_map: Arc<Mutex<&mut SBCMap<D, Hash>>>,
+    parent_hash: Hash,
+    cluster: &mut [ClusterPoint<Hash>],
 ) -> ParentChunkInCluster {
     let mut target_map_lock = target_map.lock().unwrap();
     match target_map_lock.get(&SBCKey {

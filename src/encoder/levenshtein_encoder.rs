@@ -15,13 +15,13 @@ pub(crate) enum Action {
 pub struct LevenshteinEncoder;
 
 impl LevenshteinEncoder {
-    fn encode_delta_chunk<D: Decoder>(
-        target_map: Arc<Mutex<&mut SBCMap<D>>>,
+    fn encode_delta_chunk<D: Decoder, Hash: SBCHash>(
+        target_map: Arc<Mutex<&mut SBCMap<D, Hash>>>,
         data: &[u8],
-        hash: SBCHash,
+        hash: Hash,
         parent_data: &[u8],
-        parent_hash: SBCHash,
-    ) -> (usize, usize, SBCKey) {
+        parent_hash: Hash,
+    ) -> (usize, usize, SBCKey<Hash>) {
         let mut delta_chunk = Vec::new();
 
         match encode(data, parent_data) {
@@ -56,11 +56,11 @@ impl LevenshteinEncoder {
 }
 
 impl Encoder for LevenshteinEncoder {
-    fn encode_cluster<D: Decoder>(
+    fn encode_cluster<D: Decoder, Hash: SBCHash>(
         &self,
-        target_map: Arc<Mutex<&mut SBCMap<D>>>,
-        cluster: &mut [ClusterPoint],
-        parent_hash: SBCHash,
+        target_map: Arc<Mutex<&mut SBCMap<D, Hash>>>,
+        cluster: &mut [ClusterPoint<Hash>],
+        parent_hash: Hash,
     ) -> (usize, usize) {
         let mut processed_data = 0;
         let parent_chunk = get_parent_data(target_map.clone(), parent_hash.clone(), cluster);
@@ -236,7 +236,7 @@ fn encode_delta_action(action: Action, index: usize, byte_value: u8) -> u32 {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::decoder;
+    use crate::{AronovichHash, decoder};
     use crate::SBCHash::Aronovich;
 
     #[test]
@@ -338,7 +338,7 @@ mod test {
         assert_eq!(
             sbc_key.chunk_type,
             ChunkType::Delta {
-                parent_hash: Aronovich(0),
+                parent_hash: AronovichHash::new(0),
                 number: 0
             }
         );
@@ -356,7 +356,7 @@ mod test {
         assert_eq!(
             sbc_key.chunk_type,
             ChunkType::Delta {
-                parent_hash: Aronovich(0),
+                parent_hash: AronovichHash::new(0),
                 number: 0
             }
         );
@@ -365,15 +365,15 @@ mod test {
     fn create_map_and_key<'a>(
         data: &'a [u8],
         data2: &'a [u8],
-    ) -> (SBCMap<decoder::LevenshteinDecoder>, SBCKey) {
+    ) -> (SBCMap<decoder::LevenshteinDecoder, AronovichHash>, SBCKey<AronovichHash>) {
         let mut binding = SBCMap::new(decoder::LevenshteinDecoder);
         let sbc_map = Arc::new(Mutex::new(&mut binding));
 
-        let (_, sbc_key) = encode_simple_chunk(&mut sbc_map.lock().unwrap(), data, Aronovich(0));
+        let (_, sbc_key) = encode_simple_chunk(&mut sbc_map.lock().unwrap(), data, AronovichHash::new(0));
         let (_, _, sbc_key_2) = LevenshteinEncoder::encode_delta_chunk(
             sbc_map.clone(),
             data2,
-            Aronovich(3),
+            AronovichHash::new(3),
             data,
             sbc_key.hash.clone(),
         );

@@ -1,6 +1,6 @@
 use crate::chunkfs_sbc::{ClusterPoint, Clusters};
 use crate::clusterer::Clusterer;
-use crate::SBCHash;
+use crate::{SBCHash};
 use std::collections::HashMap;
 
 const MAX_WEIGHT_EDGE: u32 = 1 << 5;
@@ -18,16 +18,13 @@ impl Vertex {
 pub struct Graph {
     vertices: HashMap<u32, Vertex>,
 }
-impl Clusterer for Graph {
-    fn clusterize<'a>(&mut self, chunk_sbc_hash: Vec<ClusterPoint<'a>>) -> Clusters<'a> {
-        let mut clusters: Clusters = HashMap::default();
+impl<Hash: SBCHash> Clusterer<Hash> for Graph {
+    fn clusterize<'a>(&mut self, chunk_sbc_hash: Vec<ClusterPoint<'a, Hash>>) -> Clusters<'a, Hash> {
+        let mut clusters: Clusters<Hash> = HashMap::default();
         for (sbc_hash, data_container) in chunk_sbc_hash {
-            let key = match sbc_hash {
-                SBCHash::Aronovich(key) => key,
-                SBCHash::Broder(_) => panic!("Graph Clusterer is not suitable for Broder hash"),
-            };
+            let key = sbc_hash.get_key_for_graph_clusterer();
             let parent_key = self.set_parent_vertex(key);
-            let cluster = clusters.entry(SBCHash::Aronovich(parent_key)).or_default();
+            let cluster = clusters.entry(Hash::new(parent_key)).or_default();
             cluster.push((sbc_hash, data_container))
         }
         clusters
