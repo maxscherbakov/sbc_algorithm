@@ -95,6 +95,38 @@ impl GdeltaEncoder {
         let _ = target_map_lock.insert(sbc_hash.clone(), delta_code);
         (0, processed_data, sbc_hash)
     }
+
+    // fn encode_delta_chunks<D: Decoder, Hash: SBCHash>(
+    //     &self,
+    //     target_map: Arc<Mutex<&mut SBCMap<D, Hash>>>,
+    //     cluster: &mut [ClusterPoint<Hash>],
+    //     parent_hash: Hash,
+    //     parent_chunk: ParentChunkInCluster,
+    // ) {
+    //     for (chunk_id, (hash, data_container)) in cluster.iter_mut().enumerate() {
+    //         if parent_chunk.index > -1 && chunk_id == parent_chunk.index as usize {
+    //             continue;
+    //         }
+    //         let mut target_hash = SBCKey::default();
+    //         match data_container.extract() {
+    //             Data::Chunk(data) => {
+    //                 let (left, processed, sbc_hash) = self.encode_delta_chunk(
+    //                     target_map.clone(),
+    //                     data,
+    //                     hash.clone(),
+    //                     parent_chunk.parent_data.as_slice(),
+    //                     &word_hash_offsets,
+    //                     parent_hash.clone(),
+    //                 );
+    //                 data_left += left;
+    //                 processed_data += processed;
+    //                 target_hash = sbc_hash;
+    //             }
+    //             Data::TargetChunk(_) => {}
+    //         }
+    //         data_container.make_target(vec![target_hash]);
+    //     }
+    // }
 }
 
 impl Encoder for GdeltaEncoder {

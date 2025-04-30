@@ -25,7 +25,7 @@ impl Hash for AronovichHash {
 
 impl Clone for AronovichHash {
     fn clone(&self) -> Self {
-        AronovichHash::new(self.hash)
+        AronovichHash::new_with_u32(self.hash)
     }
 }
 
@@ -39,12 +39,12 @@ impl PartialEq<Self> for AronovichHash {
 
 impl Default for AronovichHash {
     fn default() -> Self {
-        Self::new(u32::default())
+        Self::new_with_u32(u32::default())
     }
 }
 
 impl SBCHash for AronovichHash {
-    fn new(hash: u32) -> Self {
+    fn new_with_u32(hash: u32) -> Self {
         AronovichHash { hash }
     }
     fn next_hash(&self) -> Self {
@@ -86,7 +86,7 @@ impl Hasher for AronovichHasher {
 
         let c_f_hash = processing_of_c_f_spectrum(byte_value_byte_frequency);
         let p_hash = processing_of_p_spectrum(pair_value_pair_frequency);
-        AronovichHash::new(c_f_hash ^ p_hash)
+        AronovichHash::new_with_u32(c_f_hash ^ p_hash)
     }
 }
 

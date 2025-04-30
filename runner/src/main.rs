@@ -24,14 +24,15 @@ fn generate_data(mb_size: usize) -> Vec<u8> {
 
 fn main() -> io::Result<()> {
     let data = fs::read("runner/files/my_data")?;
+    // data = data[820 * 1024..850 * 1024].to_vec();
     let chunk_size = SizeParams::new(2 * 1024, 8 * 1024, 16 * 1024);
     let mut fs = FileSystem::new_with_scrubber(
         HashMap::default(),
         SBCMap::new(decoder::GdeltaDecoder),
         Box::new(SBCScrubber::new(
             hasher::AronovichHasher,
-            clusterer::Graph::new(),
-            encoder::GdeltaEncoder,
+            clusterer::GraphClusterer::default(),
+            encoder::XdeltaEncoder,
         )),
         Sha256Hasher::default(),
     );
@@ -40,12 +41,14 @@ fn main() -> io::Result<()> {
     fs.write_to_file(&mut handle, &data)?;
     fs.close_file(handle)?;
     let cdc_dedup_ratio = fs.cdc_dedup_ratio();
-    let res = fs.scrub().unwrap();
+    let res = fs.scrub()?;
     let sbc_dedup_ratio = fs.total_dedup_ratio();
     println!("{}, {:?}, {}", cdc_dedup_ratio, res, sbc_dedup_ratio);
 
     let handle = fs.open_file_readonly("file".to_string());
-    let read_data = fs.read_file_complete(&handle.unwrap()).unwrap();
+    let read_data = fs.read_file_complete(&handle?)?;
+
+    assert_eq!(data.len(), read_data.len());
     assert_eq!(data, read_data);
     Ok(())
 }

@@ -2,16 +2,31 @@ pub use aronovich_hash::{AronovichHash, AronovichHasher};
 use std::hash;
 mod aronovich_hash;
 
-pub trait Hasher {
-    type Hash: SBCHash;
-    fn calculate_hash(&self, chunk_data: &[u8]) -> Self::Hash;
-}
-
+/// Defines core hash functionality for Similarity-Based Chunking (SBC).
 pub trait SBCHash: hash::Hash + Clone + Eq + PartialEq + Default + Send + Sync {
-    fn new(key: u32) -> Self;
+    /// Creates a new hash instance from a 32-bit unsigned integer key.
+    fn new_with_u32(key: u32) -> Self;
+
+    /// Generates the successor hash in the similarity hash sequence.
+    /// Used when exploring adjacent hashes in clustering operations.
     fn next_hash(&self) -> Self;
 
+    /// Generates the predecessor hash in the similarity hash sequence.
+    /// Used when exploring adjacent hashes in clustering operations.
     fn last_hash(&self) -> Self;
 
+    /// Extracts a 32-bit key for graph clustering algorithms.
     fn get_key_for_graph_clusterer(&self) -> u32;
+}
+
+/// A hasher that produces `SBCHash`-compatible digests from raw data.
+///
+/// # Type Parameters
+/// * `Hash` - The output hash type implementing `SBCHash`
+pub trait Hasher {
+    /// The concrete hash type produced by this hasher
+    type Hash: SBCHash;
+
+    /// Computes the similarity hash for a data chunk.
+    fn calculate_hash(&self, chunk_data: &[u8]) -> Self::Hash;
 }

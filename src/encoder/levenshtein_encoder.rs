@@ -6,15 +6,18 @@ use chunkfs::{Data, Database};
 use std::cmp::min;
 use std::sync::{Arc, Mutex};
 
+/// an enumeration indicating the action of converting a byte
 pub(crate) enum Action {
     Del,
     Add,
     Rep,
 }
 
+/// An encoder using the Levenshtein editorial prescription method
 pub struct LevenshteinEncoder;
 
 impl LevenshteinEncoder {
+    /// Method of calculating the delta code using Levenshtein's editorial prescription and writing it to the repository
     fn encode_delta_chunk<D: Decoder, Hash: SBCHash>(
         target_map: Arc<Mutex<&mut SBCMap<D, Hash>>>,
         data: &[u8],
@@ -101,6 +104,8 @@ impl Encoder for LevenshteinEncoder {
     }
 }
 
+/// A method for optimizing the construction of the Levenshtein editorial prescription matrix by
+/// chopping off identical parts at the end and beginning of chunks
 fn find_id_non_eq_byte(data_chunk: &[u8], data_chunk_parent: &[u8]) -> (usize, usize) {
     let mut id_non_eq_byte_start = 0;
     while data_chunk[id_non_eq_byte_start] == data_chunk_parent[id_non_eq_byte_start] {
@@ -127,6 +132,7 @@ fn find_id_non_eq_byte(data_chunk: &[u8], data_chunk_parent: &[u8]) -> (usize, u
     (id_non_eq_byte_start, id_non_eq_byte_end)
 }
 
+/// A method that calculates the delta-code according to the matrix of editorial requirements
 fn encode(data_chunk: &[u8], data_chunk_parent: &[u8]) -> Option<Vec<u32>> {
     let max_len_delta_code = data_chunk.len() as u32;
     let mut delta_code = Vec::new();
@@ -195,6 +201,7 @@ pub(crate) fn levenshtein_distance(data_chunk: &[u8], data_chunk_parent: &[u8]) 
     levenshtein_matrix[data_chunk_parent.len()][data_chunk.len()]
 }
 
+/// Create Levenshtein matrix for chunks
 fn levenshtein_matrix(data_chunk: &[u8], data_chunk_parent: &[u8]) -> Vec<Vec<u32>> {
     let mut levenshtein_matrix =
         vec![vec![0u32; data_chunk.len() + 1]; data_chunk_parent.len() + 1];
@@ -214,6 +221,7 @@ fn levenshtein_matrix(data_chunk: &[u8], data_chunk_parent: &[u8]) -> Vec<Vec<u3
     levenshtein_matrix
 }
 
+/// A function that turns a tuple from a Yandex action and a byte into a u32 for writing to storage
 fn encode_delta_action(action: Action, index: usize, byte_value: u8) -> u32 {
     let mut code = 0u32;
     match action {
@@ -338,7 +346,7 @@ mod test {
         assert_eq!(
             sbc_key.chunk_type,
             ChunkType::Delta {
-                parent_hash: AronovichHash::new(0),
+                parent_hash: AronovichHash::new_with_u32(0),
                 number: 0
             }
         );
@@ -356,7 +364,7 @@ mod test {
         assert_eq!(
             sbc_key.chunk_type,
             ChunkType::Delta {
-                parent_hash: AronovichHash::new(0),
+                parent_hash: AronovichHash::new_with_u32(0),
                 number: 0
             }
         );
@@ -372,12 +380,15 @@ mod test {
         let mut binding = SBCMap::new(decoder::LevenshteinDecoder);
         let sbc_map = Arc::new(Mutex::new(&mut binding));
 
-        let (_, sbc_key) =
-            encode_simple_chunk(&mut sbc_map.lock().unwrap(), data, AronovichHash::new(0));
+        let (_, sbc_key) = encode_simple_chunk(
+            &mut sbc_map.lock().unwrap(),
+            data,
+            AronovichHash::new_with_u32(0),
+        );
         let (_, _, sbc_key_2) = LevenshteinEncoder::encode_delta_chunk(
             sbc_map.clone(),
             data2,
-            AronovichHash::new(3),
+            AronovichHash::new_with_u32(3),
             data,
             sbc_key.hash.clone(),
         );

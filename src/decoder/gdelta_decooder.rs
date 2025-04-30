@@ -3,6 +3,9 @@ use crate::decoder::Decoder;
 /// Decoder based on Gdelta compression algorithm.
 pub struct GdeltaDecoder;
 
+/// The method is based on copy and paste constructions.
+/// The insert contains a handler of 3 bytes with the length of the insert and the data to insert.
+/// To copy a handler of 6 bytes with a length and a shift in the parent chunk.
 impl Decoder for GdeltaDecoder {
     fn decode_chunk(&self, parent_data: Vec<u8>, delta_code: &[u8]) -> Vec<u8> {
         let mut chunk_data = Vec::new();

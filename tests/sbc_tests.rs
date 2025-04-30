@@ -17,7 +17,7 @@ mod test {
             SBCMap::new(LevenshteinDecoder),
             Box::new(SBCScrubber::new(
                 hasher::AronovichHasher,
-                clusterer::Graph::new(),
+                clusterer::GraphClusterer::default(),
                 LevenshteinEncoder,
             )),
             Sha256Hasher::default(),
@@ -43,7 +43,7 @@ mod test {
             SBCMap::new(GdeltaDecoder),
             Box::new(SBCScrubber::new(
                 hasher::AronovichHasher,
-                clusterer::Graph::default(),
+                clusterer::GraphClusterer::default(),
                 GdeltaEncoder,
             )),
             Sha256Hasher::default(),

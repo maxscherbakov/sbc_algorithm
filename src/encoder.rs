@@ -1,5 +1,6 @@
 mod gdelta_encoder;
 mod levenshtein_encoder;
+mod xdelta_encoder;
 
 use super::chunkfs_sbc::{ClusterPoint, Clusters};
 use crate::decoder::Decoder;
@@ -11,6 +12,7 @@ pub use levenshtein_encoder::LevenshteinEncoder;
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use std::sync::{Arc, Mutex, MutexGuard};
+pub use xdelta_encoder::XdeltaEncoder;
 
 /// A trait for encoding data clusters using Similarity Based Chunking (SBC).
 ///
