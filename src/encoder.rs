@@ -7,12 +7,12 @@ use crate::decoder::Decoder;
 use crate::{ChunkType, SBCHash, SBCKey, SBCMap};
 use chunkfs::{Data, Database, IterableDatabase};
 pub use gdelta_encoder::GdeltaEncoder;
-pub(crate) use {levenshtein_encoder::Action, gdelta_encoder::GEAR};
 pub use levenshtein_encoder::LevenshteinEncoder;
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use std::sync::{Arc, Mutex, MutexGuard};
 pub use xdelta_encoder::XdeltaEncoder;
+pub(crate) use {gdelta_encoder::GEAR, levenshtein_encoder::Action};
 
 /// A trait for encoding data clusters using Similarity Based Chunking (SBC).
 ///

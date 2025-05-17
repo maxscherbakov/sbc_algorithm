@@ -29,9 +29,7 @@ impl Clone for AronovichHash {
     }
 }
 
-impl Eq for AronovichHash {
-
-}
+impl Eq for AronovichHash {}
 
 impl PartialEq<Self> for AronovichHash {
     fn eq(&self, other: &Self) -> bool {

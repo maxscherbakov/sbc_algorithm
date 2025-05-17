@@ -24,7 +24,6 @@ impl Default for LevenshteinEncoder {
     }
 }
 
-
 impl LevenshteinEncoder {
     pub fn new(zstd_flag: bool) -> Self {
         LevenshteinEncoder { zstd_flag }

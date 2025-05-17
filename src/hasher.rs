@@ -22,7 +22,6 @@ pub trait SBCHash: hash::Hash + Clone + Eq + PartialEq + Default + Send + Sync {
     fn get_key_for_graph_clusterer(&self) -> u32;
 }
 
-
 /// A hasher that produces `SBCHash`-compatible digests from raw data.
 ///
 /// # Type Parameters

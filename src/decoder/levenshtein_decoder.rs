@@ -1,5 +1,5 @@
 use crate::decoder::Decoder;
-use crate::encoder::{Action};
+use crate::encoder::Action;
 
 /// Decoder based on Levenshtein compression algorithm.
 pub struct LevenshteinDecoder {
@@ -16,7 +16,6 @@ impl LevenshteinDecoder {
         LevenshteinDecoder { zstd_flag }
     }
 }
-
 
 impl Decoder for LevenshteinDecoder {
     /// Decodes a chunk by applying delta actions to the given parent data.
