@@ -76,7 +76,7 @@ pub struct SBCKey<H: SBCHash> {
 /// use sbc_algorithm::hasher::AronovichHash;
 /// use sbc_algorithm::SBCMap;
 ///
-/// let mut map: SBCMap<LevenshteinDecoder, AronovichHash> = SBCMap::new(LevenshteinDecoder);
+/// let mut map: SBCMap<LevenshteinDecoder, AronovichHash> = SBCMap::new(LevenshteinDecoder::default());
 /// ```
 pub struct SBCMap<D: Decoder, H: SBCHash> {
     /// Internal storage mapping chunk keys to their raw byte content.

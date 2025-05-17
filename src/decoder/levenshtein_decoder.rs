@@ -1,8 +1,23 @@
 use crate::decoder::Decoder;
-use crate::encoder::Action;
+use crate::encoder::{Action};
 
 /// Decoder based on Levenshtein compression algorithm.
-pub struct LevenshteinDecoder;
+pub struct LevenshteinDecoder {
+    zstd_flag: bool,
+}
+
+impl Default for LevenshteinDecoder {
+    fn default() -> Self {
+        Self::new(false)
+    }
+}
+impl LevenshteinDecoder {
+    pub fn new(zstd_flag: bool) -> Self {
+        LevenshteinDecoder { zstd_flag }
+    }
+}
+
+
 impl Decoder for LevenshteinDecoder {
     /// Decodes a chunk by applying delta actions to the given parent data.
     ///
@@ -15,6 +30,12 @@ impl Decoder for LevenshteinDecoder {
     ///
     /// A new `Vec<u8>` containing the fully decoded chunk.
     fn decode_chunk(&self, mut parent_data: Vec<u8>, delta_code: &[u8]) -> Vec<u8> {
+        let delta_code = if self.zstd_flag {
+            zstd::decode_all(delta_code).unwrap()
+        } else {
+            delta_code.to_vec()
+        };
+
         let mut buf = [0u8; 4];
         let mut byte_index = 0;
 

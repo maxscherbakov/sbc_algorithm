@@ -7,11 +7,25 @@ use chunkfs::Database;
 use std::cmp::min;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use zstd::stream;
 
-pub struct GdeltaEncoder;
+pub struct GdeltaEncoder {
+    zstd_flag: bool,
+}
+
+impl Default for GdeltaEncoder {
+    fn default() -> Self {
+        Self::new(false)
+    }
+}
 
 impl GdeltaEncoder {
+    pub fn new(zstd_flag: bool) -> Self {
+        GdeltaEncoder { zstd_flag }
+    }
+
     fn encode_delta_chunk<D: Decoder, Hash: SBCHash>(
+        &self,
         target_map: Arc<Mutex<&mut SBCMap<D, Hash>>>,
         chunk_data: &[u8],
         hash: Hash,
@@ -91,42 +105,13 @@ impl GdeltaEncoder {
                 number: number_delta_chunk,
             },
         };
+        if self.zstd_flag {
+            delta_code = stream::encode_all(delta_code.as_slice(), 0).unwrap();
+        }
         let processed_data = delta_code.len();
         let _ = target_map_lock.insert(sbc_hash.clone(), delta_code);
         (0, processed_data, sbc_hash)
     }
-
-    // fn encode_delta_chunks<D: Decoder, Hash: SBCHash>(
-    //     &self,
-    //     target_map: Arc<Mutex<&mut SBCMap<D, Hash>>>,
-    //     cluster: &mut [ClusterPoint<Hash>],
-    //     parent_hash: Hash,
-    //     parent_chunk: ParentChunkInCluster,
-    // ) {
-    //     for (chunk_id, (hash, data_container)) in cluster.iter_mut().enumerate() {
-    //         if parent_chunk.index > -1 && chunk_id == parent_chunk.index as usize {
-    //             continue;
-    //         }
-    //         let mut target_hash = SBCKey::default();
-    //         match data_container.extract() {
-    //             Data::Chunk(data) => {
-    //                 let (left, processed, sbc_hash) = self.encode_delta_chunk(
-    //                     target_map.clone(),
-    //                     data,
-    //                     hash.clone(),
-    //                     parent_chunk.parent_data.as_slice(),
-    //                     &word_hash_offsets,
-    //                     parent_hash.clone(),
-    //                 );
-    //                 data_left += left;
-    //                 processed_data += processed;
-    //                 target_hash = sbc_hash;
-    //             }
-    //             Data::TargetChunk(_) => {}
-    //         }
-    //         data_container.make_target(vec![target_hash]);
-    //     }
-    // }
 }
 
 impl Encoder for GdeltaEncoder {
@@ -163,7 +148,7 @@ impl Encoder for GdeltaEncoder {
             let mut target_hash = SBCKey::default();
             match data_container.extract() {
                 Data::Chunk(data) => {
-                    let (left, processed, sbc_hash) = Self::encode_delta_chunk(
+                    let (left, processed, sbc_hash) = self.encode_delta_chunk(
                         target_map.clone(),
                         data,
                         hash.clone(),
@@ -185,7 +170,7 @@ impl Encoder for GdeltaEncoder {
 
 // Gear table taken from https://github.com/nlfiedler/fastcdc-rs
 #[rustfmt::skip]
-const GEAR: [u64; 256] = [
+pub(crate) const GEAR: [u64; 256] = [
     0x3b5d3c7d207e37dc, 0x784d68ba91123086, 0xcd52880f882e7298, 0xeacf8e4e19fdcca7,
     0xc31f385dfbd1632b, 0x1d5f27001e25abe6, 0x83130bde3c9ad991, 0xc4b225676e9b7649,
     0xaa329b29e08eb499, 0xb67fcbd21e577d58, 0x0027baaada2acf6b, 0xe3ef2d5ac73c2226,

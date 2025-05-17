@@ -7,7 +7,7 @@ use crate::decoder::Decoder;
 use crate::{ChunkType, SBCHash, SBCKey, SBCMap};
 use chunkfs::{Data, Database, IterableDatabase};
 pub use gdelta_encoder::GdeltaEncoder;
-pub(crate) use levenshtein_encoder::Action;
+pub(crate) use {levenshtein_encoder::Action, gdelta_encoder::GEAR};
 pub use levenshtein_encoder::LevenshteinEncoder;
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;

@@ -1,3 +1,5 @@
+mod bench;
+
 extern crate chunkfs;
 extern crate sbc_algorithm;
 
@@ -24,15 +26,14 @@ fn generate_data(mb_size: usize) -> Vec<u8> {
 
 fn main() -> io::Result<()> {
     let data = fs::read("runner/files/my_data")?;
-    // data = data[820 * 1024..850 * 1024].to_vec();
     let chunk_size = SizeParams::new(2 * 1024, 8 * 1024, 16 * 1024);
     let mut fs = FileSystem::new_with_scrubber(
         HashMap::default(),
-        SBCMap::new(decoder::GdeltaDecoder),
+        SBCMap::new(decoder::GdeltaDecoder::default()),
         Box::new(SBCScrubber::new(
-            hasher::AronovichHasher,
-            clusterer::GraphClusterer::default(),
-            encoder::XdeltaEncoder,
+            hasher::OdessHasher::default(),
+            clusterer::EqClusterer,
+            encoder::GdeltaEncoder::default(),
         )),
         Sha256Hasher::default(),
     );

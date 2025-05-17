@@ -1,4 +1,4 @@
-use crate::hasher::Hasher;
+use crate::hasher::SBCHasher;
 use crate::SBCHash;
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -29,7 +29,9 @@ impl Clone for AronovichHash {
     }
 }
 
-impl Eq for AronovichHash {}
+impl Eq for AronovichHash {
+
+}
 
 impl PartialEq<Self> for AronovichHash {
     fn eq(&self, other: &Self) -> bool {
@@ -65,7 +67,7 @@ impl SBCHash for AronovichHash {
 }
 pub struct AronovichHasher;
 
-impl Hasher for AronovichHasher {
+impl SBCHasher for AronovichHasher {
     type Hash = AronovichHash;
 
     fn calculate_hash(&self, chunk_data: &[u8]) -> AronovichHash {

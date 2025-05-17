@@ -14,11 +14,11 @@ mod test {
     fn test_data_recovery_levenshtein() {
         let mut fs = FileSystem::new_with_scrubber(
             HashMap::default(),
-            SBCMap::new(LevenshteinDecoder),
+            SBCMap::new(LevenshteinDecoder::default()),
             Box::new(SBCScrubber::new(
                 hasher::AronovichHasher,
                 clusterer::GraphClusterer::default(),
-                LevenshteinEncoder,
+                LevenshteinEncoder::default(),
             )),
             Sha256Hasher::default(),
         );
@@ -40,11 +40,11 @@ mod test {
     fn test_data_recovery_gdelta() {
         let mut fs = FileSystem::new_with_scrubber(
             HashMap::default(),
-            SBCMap::new(GdeltaDecoder),
+            SBCMap::new(GdeltaDecoder::default()),
             Box::new(SBCScrubber::new(
                 hasher::AronovichHasher,
                 clusterer::GraphClusterer::default(),
-                GdeltaEncoder,
+                GdeltaEncoder::default(),
             )),
             Sha256Hasher::default(),
         );

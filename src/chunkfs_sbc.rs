@@ -1,7 +1,7 @@
 use crate::clusterer::Clusterer;
 use crate::decoder::Decoder;
 use crate::encoder::Encoder;
-use crate::hasher::Hasher;
+use crate::hasher::SBCHasher;
 use crate::{ChunkType, SBCHash, SBCKey, SBCMap};
 use chunkfs::{
     ChunkHash, Data, DataContainer, Database, IterableDatabase, Scrub, ScrubMeasurements,
@@ -71,7 +71,6 @@ impl<D: Decoder, Hash: SBCHash> Database<SBCKey<Hash>, Vec<u8>> for SBCMap<D, Ha
 
         let chunk = match &sbc_hash.chunk_type {
             ChunkType::Simple {} => sbc_value.clone(),
-
             ChunkType::Delta {
                 parent_hash,
                 number: _,
@@ -161,11 +160,11 @@ impl<D: Decoder, Hash: SBCHash> IterableDatabase<SBCKey<Hash>, Vec<u8>> for SBCM
 ///     let chunk_size = SizeParams::new(2 * 1024, 8 * 1024, 16 * 1024);
 ///     let mut fs = FileSystem::new_with_scrubber(
 ///         HashMap::default(),
-///         SBCMap::new(decoder::GdeltaDecoder),
+///         SBCMap::new(decoder::GdeltaDecoder::default()),
 ///         Box::new(SBCScrubber::new(
 ///             hasher::AronovichHasher,
 ///             clusterer::GraphClusterer::default(),
-///             encoder::GdeltaEncoder,
+///             encoder::GdeltaEncoder::default(),
 ///         )),
 ///         Sha256Hasher::default(),
 ///     );
@@ -190,7 +189,7 @@ impl<D: Decoder, Hash: SBCHash> IterableDatabase<SBCKey<Hash>, Vec<u8>> for SBCM
 pub struct SBCScrubber<Hash, H, C, E>
 where
     Hash: SBCHash,
-    H: Hasher<Hash = Hash>,
+    H: SBCHasher<Hash = Hash>,
     C: Clusterer<Hash>,
     E: Encoder,
 {
@@ -207,7 +206,7 @@ where
 impl<Hash, H, C, E> SBCScrubber<Hash, H, C, E>
 where
     Hash: SBCHash,
-    H: Hasher<Hash = Hash>,
+    H: SBCHasher<Hash = Hash>,
     C: Clusterer<Hash>,
     E: Encoder,
 {
@@ -237,7 +236,7 @@ where
     CDCHash: ChunkHash,
     for<'data> B:
         IterableDatabase<CDCHash, DataContainer<SBCKey<Hash>>> + IntoParallelRefMutIterator<'data>,
-    H: Hasher<Hash = Hash> + Sync,
+    H: SBCHasher<Hash = Hash> + Sync,
     C: Clusterer<Hash>,
     D: Decoder + Send,
     E: Encoder + Sync,

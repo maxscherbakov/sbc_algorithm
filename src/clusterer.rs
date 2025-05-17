@@ -1,8 +1,10 @@
 mod graph_clusterer;
+mod eq_clusterer;
 
 use crate::chunkfs_sbc::{ClusterPoint, Clusters};
 use crate::SBCHash;
 pub use graph_clusterer::GraphClusterer;
+pub use eq_clusterer::EqClusterer;
 
 /// A trait defining the clustering behavior for similarity-based chunking.
 ///

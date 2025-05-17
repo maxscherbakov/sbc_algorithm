@@ -1,13 +1,33 @@
 use crate::decoder::Decoder;
 
 /// Decoder based on Gdelta compression algorithm.
-pub struct GdeltaDecoder;
+pub struct GdeltaDecoder {
+    zstd_flag: bool,
+}
+
+impl GdeltaDecoder {
+    pub fn new(zstd_flag: bool) -> Self {
+        GdeltaDecoder { zstd_flag }
+    }
+}
+
+impl Default for GdeltaDecoder {
+    fn default() -> Self {
+        Self::new(false)
+    }
+}
 
 /// The method is based on copy and paste constructions.
 /// The insert contains a handler of 3 bytes with the length of the insert and the data to insert.
 /// To copy a handler of 6 bytes with a length and a shift in the parent chunk.
 impl Decoder for GdeltaDecoder {
     fn decode_chunk(&self, parent_data: Vec<u8>, delta_code: &[u8]) -> Vec<u8> {
+        let delta_code = if self.zstd_flag {
+            zstd::decode_all(delta_code).unwrap()
+        } else {
+            delta_code.to_vec()
+        };
+
         let mut chunk_data = Vec::new();
         let mut byte_id = 0;
 

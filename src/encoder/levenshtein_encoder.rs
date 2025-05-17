@@ -14,11 +14,25 @@ pub(crate) enum Action {
 }
 
 /// An encoder using the Levenshtein editorial prescription method
-pub struct LevenshteinEncoder;
+pub struct LevenshteinEncoder {
+    zstd_flag: bool,
+}
+
+impl Default for LevenshteinEncoder {
+    fn default() -> Self {
+        Self::new(false)
+    }
+}
+
 
 impl LevenshteinEncoder {
+    pub fn new(zstd_flag: bool) -> Self {
+        LevenshteinEncoder { zstd_flag }
+    }
+
     /// Method of calculating the delta code using Levenshtein's editorial prescription and writing it to the repository
     fn encode_delta_chunk<D: Decoder, Hash: SBCHash>(
+        &self,
         target_map: Arc<Mutex<&mut SBCMap<D, Hash>>>,
         data: &[u8],
         hash: Hash,
@@ -39,6 +53,11 @@ impl LevenshteinEncoder {
                         delta_chunk.push(byte);
                     }
                 }
+
+                if self.zstd_flag {
+                    delta_chunk = zstd::encode_all(delta_chunk.as_slice(), 0).unwrap();
+                }
+
                 let processed_data = delta_chunk.len();
 
                 let mut target_map_lock = target_map.lock().unwrap();
@@ -84,7 +103,7 @@ impl Encoder for LevenshteinEncoder {
                         data_left += left;
                         target_hash = sbc_hash;
                     } else {
-                        let (left, processed, sbc_hash) = Self::encode_delta_chunk(
+                        let (left, processed, sbc_hash) = self.encode_delta_chunk(
                             target_map.clone(),
                             data,
                             hash.clone(),
@@ -377,7 +396,7 @@ mod test {
         SBCMap<decoder::LevenshteinDecoder, AronovichHash>,
         SBCKey<AronovichHash>,
     ) {
-        let mut binding = SBCMap::new(decoder::LevenshteinDecoder);
+        let mut binding = SBCMap::new(decoder::LevenshteinDecoder::default());
         let sbc_map = Arc::new(Mutex::new(&mut binding));
 
         let (_, sbc_key) = encode_simple_chunk(
@@ -385,7 +404,7 @@ mod test {
             data,
             AronovichHash::new_with_u32(0),
         );
-        let (_, _, sbc_key_2) = LevenshteinEncoder::encode_delta_chunk(
+        let (_, _, sbc_key_2) = LevenshteinEncoder::default().encode_delta_chunk(
             sbc_map.clone(),
             data2,
             AronovichHash::new_with_u32(3),

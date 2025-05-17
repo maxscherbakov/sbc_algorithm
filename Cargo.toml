@@ -10,6 +10,7 @@ edition = "2021"
 chunkfs = "0.1"
 futures = "0.3"
 rayon = "1.10"
+zstd = "0.13"
 
 [dev-dependencies]
 rand = "0.8.5"

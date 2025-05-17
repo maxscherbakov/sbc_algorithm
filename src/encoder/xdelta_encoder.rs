@@ -7,13 +7,29 @@ use chunkfs::Database;
 use std::cmp::min;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use zstd::stream;
 
 const BLOCK_SIZE: usize = 16;
 
-pub struct XdeltaEncoder;
+pub struct XdeltaEncoder {
+    zstd_flag: bool,
+}
+
+impl XdeltaEncoder {
+    pub fn new(zstd_flag: bool) -> Self {
+        XdeltaEncoder { zstd_flag }
+    }
+}
+
+impl Default for XdeltaEncoder {
+    fn default() -> Self {
+        Self::new(false)
+    }
+}
 
 impl XdeltaEncoder {
     fn encode_delta_chunk<D: Decoder, Hash: SBCHash>(
+        &self,
         target_map: Arc<Mutex<&mut SBCMap<D, Hash>>>,
         chunk_data: &[u8],
         hash: Hash,
@@ -84,6 +100,10 @@ impl XdeltaEncoder {
                 number: number_delta_chunk,
             },
         };
+
+        if self.zstd_flag {
+            delta_code = stream::encode_all(delta_code.as_slice(), 0).unwrap();
+        }
         let processed_data = delta_code.len();
         let _ = target_map_lock.insert(sbc_hash.clone(), delta_code);
         (0, processed_data, sbc_hash)
@@ -109,7 +129,7 @@ impl Encoder for XdeltaEncoder {
             let mut target_hash = SBCKey::default();
             match data_container.extract() {
                 Data::Chunk(data) => {
-                    let (left, processed, sbc_hash) = Self::encode_delta_chunk(
+                    let (left, processed, sbc_hash) = self.encode_delta_chunk(
                         target_map.clone(),
                         data,
                         hash.clone(),
@@ -363,7 +383,7 @@ mod test {
         SBCKey<AronovichHash>,
     ) {
         let word_hash_offsets = init_match(data);
-        let mut binding = SBCMap::new(decoder::GdeltaDecoder);
+        let mut binding = SBCMap::new(decoder::GdeltaDecoder::default());
         let sbc_map = Arc::new(Mutex::new(&mut binding));
 
         let (_, sbc_key) = encode_simple_chunk(
@@ -371,7 +391,7 @@ mod test {
             data,
             AronovichHash::new_with_u32(0),
         );
-        let (_, _, sbc_key_2) = XdeltaEncoder::encode_delta_chunk(
+        let (_, _, sbc_key_2) = XdeltaEncoder::default().encode_delta_chunk(
             sbc_map.clone(),
             data2,
             AronovichHash::new_with_u32(3),

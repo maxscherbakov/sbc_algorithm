@@ -1,6 +1,9 @@
 pub use aronovich_hash::{AronovichHash, AronovichHasher};
+pub use odess_hasher::{OdessHash, OdessHasher};
 use std::hash;
+
 mod aronovich_hash;
+mod odess_hasher;
 
 /// Defines core hash functionality for Similarity-Based Chunking (SBC).
 pub trait SBCHash: hash::Hash + Clone + Eq + PartialEq + Default + Send + Sync {
@@ -19,11 +22,12 @@ pub trait SBCHash: hash::Hash + Clone + Eq + PartialEq + Default + Send + Sync {
     fn get_key_for_graph_clusterer(&self) -> u32;
 }
 
+
 /// A hasher that produces `SBCHash`-compatible digests from raw data.
 ///
 /// # Type Parameters
 /// * `Hash` - The output hash type implementing `SBCHash`
-pub trait Hasher {
+pub trait SBCHasher {
     /// The concrete hash type produced by this hasher
     type Hash: SBCHash;
 
