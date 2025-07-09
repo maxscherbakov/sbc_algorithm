@@ -216,7 +216,7 @@ mod test {
         let a = 175u8;
         let b = 113u8;
         let processed_pair = processing_of_pair(&(a, b));
-        let name = &format!("{:b}", processed_pair);
+        let name = &format!("{processed_pair:b}");
         assert_eq!(name, "11111111110")
     }
 
@@ -227,7 +227,7 @@ mod test {
             p_spectrum.insert((175u8 + i as u8, 113u8), i);
         }
         let processed_p_spectrum = processing_of_p_spectrum(p_spectrum);
-        let name = &format!("{:b}", processed_p_spectrum);
+        let name = &format!("{processed_p_spectrum:b}");
         assert_eq!(name, "1111111111000000000000000000000")
     }
 
@@ -249,7 +249,7 @@ mod test {
         }
         p_spectrum.insert((7u8, 7u8), 0u32);
         let processed_p_spectrum = processing_of_p_spectrum(p_spectrum);
-        let name = &format!("{:b}", processed_p_spectrum);
+        let name = &format!("{processed_p_spectrum:b}");
         assert_eq!(name, "1001001111000000000000000000000")
     }
 

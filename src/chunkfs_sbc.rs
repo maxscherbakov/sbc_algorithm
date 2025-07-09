@@ -70,7 +70,7 @@ impl<D: Decoder, Hash: SBCHash> Database<SBCKey<Hash>, Vec<u8>> for SBCMap<D, Ha
             .ok_or(Error::new(ErrorKind::NotFound, "Chunk not found"))?;
 
         let chunk = match &sbc_hash.chunk_type {
-            ChunkType::Simple {} => sbc_value.clone(),
+            ChunkType::Simple => sbc_value.clone(),
             ChunkType::Delta {
                 parent_hash,
                 number: _,
