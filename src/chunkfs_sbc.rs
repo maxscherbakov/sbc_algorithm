@@ -14,7 +14,7 @@ use std::io::{Error, ErrorKind};
 use std::sync::Mutex;
 use std::time::Instant;
 
-const NUM_THREADS_FOR_HASHING: usize = 6;
+const NUM_THREADS_FOR_HASHING: usize = 1;
 
 pub type ClusterPoint<'a, Hash> = (Hash, &'a mut &'a mut DataContainer<SBCKey<Hash>>);
 pub type Clusters<'a, Hash> = HashMap<Hash, Vec<ClusterPoint<'a, Hash>>>;
@@ -291,22 +291,23 @@ where
                 }
             });
         });
-        let time_hashing = time_start.elapsed();
-        println!("time for hashing: {time_hashing:?}");
+        let time_hashing = time_start.elapsed().as_secs_f64();
+        print!("{time_hashing:.4};");
 
         // 2. Clustering: group chunks by similarity
         let time_clusterize_start = time_start.elapsed();
         let mut clusters = self
             .clusterer
             .clusterize(sbc_hash_chunk.into_inner().unwrap());
-        let time_clusterize = time_start.elapsed() - time_clusterize_start;
-        println!("time for clusterize: {time_clusterize:?}");
+        let time_clusterize =
+            time_start.elapsed().as_secs_f64() - time_clusterize_start.as_secs_f64();
+        print!("{time_clusterize:.4};");
 
         // 3. Encoding: encode clusters and store in target map
         let time_encode_start = time_start.elapsed();
         let (data_left, processed_data) = self.encoder.encode_clusters(&mut clusters, target_map);
-        let time_encode = time_start.elapsed() - time_encode_start;
-        println!("time for encode: {time_encode:?}");
+        let time_encode = time_start.elapsed().as_secs_f64() - time_encode_start.as_secs_f64();
+        print!("{time_encode:.4};");
 
         let running_time = time_start.elapsed();
 

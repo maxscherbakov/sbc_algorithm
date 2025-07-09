@@ -59,7 +59,7 @@ pub trait Encoder {
     where
         Self: Sync,
     {
-        let pool = ThreadPoolBuilder::new().num_threads(6).build().unwrap();
+        let pool = ThreadPoolBuilder::new().num_threads(1).build().unwrap();
 
         let data_left = Mutex::new(0);
         let processed_data = Mutex::new(0);
