@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use zstd::stream;
 
 const BLOCK_SIZE: usize = 16;
+const ADLER_MOD: u32 = 65521;
 
 pub struct XdeltaEncoder {
     zstd_flag: bool,
@@ -41,7 +42,7 @@ impl XdeltaEncoder {
 
         let mut i = 0;
         while i < chunk_data.len() - BLOCK_SIZE + 1 {
-            let mut adler_hash_word = adler32(chunk_data, i, BLOCK_SIZE);
+            let mut adler_hash_word = adler32(&chunk_data[i..i + BLOCK_SIZE]);
 
             if !word_hash_offsets.contains_key(&adler_hash_word) {
                 let mut insert_data_len = 0usize;
@@ -51,7 +52,7 @@ impl XdeltaEncoder {
                     insert_data.push(chunk_data[i]);
                     i += 1;
                     if i <= chunk_data.len() - BLOCK_SIZE {
-                        adler_hash_word = adler32(chunk_data, i, BLOCK_SIZE);
+                        adler_hash_word = adler32(&chunk_data[i..i + BLOCK_SIZE]);
                     } else {
                         insert_data.extend_from_slice(&chunk_data[i..i - 1 + BLOCK_SIZE]);
                         insert_data_len += BLOCK_SIZE - 1;
@@ -149,15 +150,22 @@ impl Encoder for XdeltaEncoder {
     }
 }
 
-// Функция adler32 для вычисления "отпечатка" блока данных
-fn adler32(data: &[u8], start: usize, length: usize) -> u32 {
+/// Computes the Adler-32 checksum for a given byte slice.
+///
+/// # Parameters
+///
+/// * `data` - Byte slice to compute checksum for.
+///
+/// # Returns
+///
+/// 32-bit Adler-32 checksum value.
+fn adler32(data: &[u8]) -> u32 {
     let mut a: u32 = 1;
     let mut b: u32 = 0;
-    let end = min(start + length, data.len());
 
-    for byte in &data[start..end] {
-        a = (a + *byte as u32) % 65521;
-        b = (b + a) % 65521;
+    for &byte in data {
+        a = (a + byte as u32) % ADLER_MOD;
+        b = (b + a) % ADLER_MOD;
     }
 
     (b << 16) | a
@@ -169,7 +177,7 @@ fn init_match(src: &[u8]) -> HashMap<u32, usize> {
     let mut sindex = HashMap::new();
 
     while i + BLOCK_SIZE <= src.len() {
-        let f = adler32(src, i, BLOCK_SIZE);
+        let f = adler32(&src[i..i + BLOCK_SIZE]);
         sindex.insert(f, i);
         i += BLOCK_SIZE;
     }
@@ -191,7 +199,7 @@ mod test {
 
         let mut i = 0;
         while i < chunk_data.len() - BLOCK_SIZE + 1 {
-            let mut adler_hash_word = adler32(chunk_data.as_slice(), i, BLOCK_SIZE);
+            let mut adler_hash_word = adler32(&chunk_data.as_slice()[i..i + BLOCK_SIZE]);
             let word_hash_offsets: HashMap<u32, usize> = HashMap::new();
             let mut insert_data_len = 0usize;
             let mut insert_data = Vec::new();
@@ -200,7 +208,7 @@ mod test {
                 insert_data.push(chunk_data[i]);
                 i += 1;
                 if i < chunk_data.len() - BLOCK_SIZE + 1 {
-                    adler_hash_word = adler32(chunk_data.as_slice(), i, BLOCK_SIZE);
+                    adler_hash_word = adler32(&chunk_data.as_slice()[i..i + BLOCK_SIZE]);
                 } else {
                     insert_data.extend_from_slice(&chunk_data[i..i + BLOCK_SIZE - 1]);
                     insert_data_len += BLOCK_SIZE - 1;
@@ -228,7 +236,7 @@ mod test {
         let mut delta_code = Vec::new();
         let mut i = 0;
         while i < chunk_data.len() - BLOCK_SIZE + 1 {
-            let adler_hash_word = adler32(chunk_data.as_slice(), i, BLOCK_SIZE);
+            let adler_hash_word = adler32(&chunk_data.as_slice()[i..i + BLOCK_SIZE]);
             let offset = *word_hash_offsets.get(&adler_hash_word).unwrap();
             let mut equal_part_len = 0;
             let max_len = min(parent_data.len() - offset, chunk_data.len() - i);
