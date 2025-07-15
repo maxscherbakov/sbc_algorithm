@@ -39,7 +39,7 @@ impl XdeltaEncoder {
         let mut delta_code = Vec::new();
 
         let mut i = 0;
-        while i < chunk_data.len() - BLOCK_SIZE + 1 {
+        while i + BLOCK_SIZE <= chunk_data.len() {
             let adler_hash_word = adler32(&chunk_data[i..i + BLOCK_SIZE]);
 
             if !word_hash_offsets.contains_key(&adler_hash_word) {
@@ -135,14 +135,15 @@ impl Encoder for XdeltaEncoder {
     }
 }
 
-/// Encodes a matching sequence as a COPY instruction.
+/// Encodes a matching sequence as a INSERT instruction.
 ///
 /// # Arguments
-/// * `parent_data` - Reference data where the match was found.
 /// * `chunk_data` - Current data being processed.
 /// * `i` - Current position in `chunk_data` (updated after execution).
-/// * `offset` - Position of the match in `parent_data`.
+/// * `word_hash_offsets` - A hash table mapping Adler-32 hashes of blocks in the parent data to their offsets.
+/// * Used to detect when a match starts at the current position.
 /// * `delta_code` - Output buffer for delta instructions.
+/// * `initial_hash` - Adler-32 hash of the first block at position `i` in `chunk_data`.
 fn encode_insert_sequence(
     chunk_data: &[u8],
     i: &mut usize,
@@ -150,35 +151,26 @@ fn encode_insert_sequence(
     delta_code: &mut Vec<u8>,
     initial_hash: u32,
 )   {
-    let start_position = *i;
-    if start_position >= chunk_data.len() {
+    let mut current_position = *i;
+    if current_position >= chunk_data.len() ||  word_hash_offsets.contains_key(&initial_hash) {
         return;
     }
 
-    let mut insert_data = Vec::with_capacity(BLOCK_SIZE);
-    let mut current_pos = start_position;
     let mut current_hash = initial_hash;
+    let mut insert_data = Vec::new();
 
-    // Collect non-matching bytes until we find a match or reach end of data
-    while current_pos + BLOCK_SIZE <= chunk_data.len() {
-        if word_hash_offsets.contains_key(&current_hash) {
-            break;
-        }
+    while !word_hash_offsets.contains_key(&current_hash) {
+        insert_data.push(chunk_data[current_position]);
+        current_position += 1;
 
-        insert_data.push(chunk_data[current_pos]);
-        current_pos += 1;
-
-        if current_pos + BLOCK_SIZE <= chunk_data.len() {
-            current_hash = adler32(&chunk_data[current_pos..current_pos + BLOCK_SIZE]);
+        if current_position + BLOCK_SIZE <= chunk_data.len() {
+            current_hash = adler32(&chunk_data[current_position..current_position + BLOCK_SIZE]);
         } else {
+            let right_border = min(current_position + BLOCK_SIZE, chunk_data.len());
+            insert_data.extend_from_slice(&chunk_data[current_position..right_border]);
+            current_position = chunk_data.len();
             break;
         }
-    }
-
-    // Handle trailing bytes (less than BLOCK_SIZE remaining)
-    if current_pos < chunk_data.len() {
-        insert_data.extend_from_slice(&chunk_data[current_pos..]);
-        current_pos = chunk_data.len();
     }
 
     if !insert_data.is_empty() {
@@ -188,7 +180,7 @@ fn encode_insert_sequence(
         len_bytes[2] |= 1 << 7;
         delta_code.extend_from_slice(len_bytes);
         delta_code.extend_from_slice(&insert_data);
-        *i = current_pos;
+        *i = current_position;
     }
 }
 
@@ -227,38 +219,79 @@ mod test {
     use crate::hasher::AronovichHash;
 
     #[test]
-    fn test_insert_instruction() {
+    fn encode_insert_sequence_should_insert_full_chunk_when_no_hash_matches() {
         let chunk_data = vec![10; 20];
+        let word_hash_offsets = HashMap::new();
         let mut delta_code = Vec::new();
-
         let mut i = 0;
-        while i < chunk_data.len() - BLOCK_SIZE + 1 {
-            let mut adler_hash_word = adler32(&chunk_data.as_slice()[i..i + BLOCK_SIZE]);
-            let word_hash_offsets: HashMap<u32, usize> = HashMap::new();
-            let mut insert_data_len = 0usize;
-            let mut insert_data = Vec::new();
-            while !word_hash_offsets.contains_key(&adler_hash_word) {
-                insert_data_len += 1;
-                insert_data.push(chunk_data[i]);
-                i += 1;
-                if i < chunk_data.len() - BLOCK_SIZE + 1 {
-                    adler_hash_word = adler32(&chunk_data.as_slice()[i..i + BLOCK_SIZE]);
-                } else {
-                    insert_data.extend_from_slice(&chunk_data[i..i + BLOCK_SIZE - 1]);
-                    insert_data_len += BLOCK_SIZE - 1;
-                    break;
-                }
-            }
 
-            // Insert instruction
-            let insert_instruction = &mut insert_data_len.to_ne_bytes()[..3];
-            insert_instruction[2] += 1 << 7;
-            delta_code.extend_from_slice(insert_instruction);
-            delta_code.extend_from_slice(&insert_data);
-        }
-        let mut assert_delta_code = vec![20, 0, 128];
-        assert_delta_code.extend_from_slice(chunk_data.as_slice());
-        assert_eq!(delta_code, assert_delta_code);
+        let adler_hash = adler32(&chunk_data[i..i + BLOCK_SIZE]);
+        encode_insert_sequence(&chunk_data, &mut i, &word_hash_offsets, &mut delta_code, adler_hash);
+
+        assert_eq!(i, chunk_data.len());
+
+        let header = &delta_code[..3];
+        assert_eq!(header, &[20, 0, 0x80]);
+
+        let data = &delta_code[3..];
+        assert_eq!(data, chunk_data.as_slice());
+    }
+
+    #[test]
+    fn encode_insert_sequence_should_insert_partial_tail_when_less_than_block_size() {
+        let chunk_data = vec![10; 5];
+        let word_hash_offsets = HashMap::new();
+        let mut delta_code = Vec::new();
+        let mut i = 0;
+
+        let adler_hash = 0;
+        encode_insert_sequence(&chunk_data, &mut i, &word_hash_offsets, &mut delta_code, adler_hash);
+        assert_eq!(i, chunk_data.len());
+
+        let header = &delta_code[..3];
+        assert_eq!(header, &[5, 0, 0x80]);
+
+        let data = &delta_code[3..];
+        assert_eq!(data, chunk_data.as_slice());
+    }
+
+    #[test]
+    fn encode_insert_sequence_should_not_insert_if_match_found_at_start() {
+        let chunk_data = vec![10; 16];
+        let mut word_hash_offsets = HashMap::new();
+        let hash = adler32(&chunk_data);
+        word_hash_offsets.insert(hash, 0);
+
+        let mut delta_code = Vec::new();
+        let mut i = 0;
+
+        encode_insert_sequence(&chunk_data, &mut i, &word_hash_offsets, &mut delta_code, hash);
+
+        assert!(delta_code.is_empty());
+        assert_eq!(i, 0);
+    }
+
+    #[test]
+    fn encode_insert_sequence_should_insert_only_part_of_data_if_match_found_later() {
+        let mut chunk_data = vec![10; 32];
+        chunk_data[..4].copy_from_slice(&[1, 2, 3, 4]);
+
+        let hash_second_block = adler32(&chunk_data[16..32]);
+
+        let mut word_hash_offsets = HashMap::new();
+        word_hash_offsets.insert(hash_second_block, 16);
+
+        let mut delta_code = Vec::new();
+        let mut i = 0;
+
+        let initial_hash = adler32(&chunk_data[i..i + BLOCK_SIZE]);
+        encode_insert_sequence(&chunk_data, &mut i, &word_hash_offsets, &mut delta_code, initial_hash);
+
+        let mut expected = vec![4, 0, 0x80];
+        expected.extend_from_slice(&[1, 2, 3, 4]);
+
+        assert_eq!(delta_code, expected);
+        assert_eq!(i, 4);
     }
 
     #[test]
