@@ -16,12 +16,6 @@ pub struct XdeltaEncoder {
     zstd_flag: bool,
 }
 
-impl XdeltaEncoder {
-    pub fn new(zstd_flag: bool) -> Self {
-        XdeltaEncoder { zstd_flag }
-    }
-}
-
 impl Default for XdeltaEncoder {
     fn default() -> Self {
         Self::new(false)
@@ -29,6 +23,10 @@ impl Default for XdeltaEncoder {
 }
 
 impl XdeltaEncoder {
+    pub fn new(zstd_flag: bool) -> Self {
+        XdeltaEncoder { zstd_flag }
+    }
+
     fn encode_delta_chunk<D: Decoder, Hash: SBCHash>(
         &self,
         target_map: Arc<Mutex<&mut SBCMap<D, Hash>>>,
@@ -42,30 +40,16 @@ impl XdeltaEncoder {
 
         let mut i = 0;
         while i < chunk_data.len() - BLOCK_SIZE + 1 {
-            let mut adler_hash_word = adler32(&chunk_data[i..i + BLOCK_SIZE]);
+            let adler_hash_word = adler32(&chunk_data[i..i + BLOCK_SIZE]);
 
             if !word_hash_offsets.contains_key(&adler_hash_word) {
-                let mut insert_data_len = 0usize;
-                let mut insert_data = Vec::new();
-                while !word_hash_offsets.contains_key(&adler_hash_word) {
-                    insert_data_len += 1;
-                    insert_data.push(chunk_data[i]);
-                    i += 1;
-                    if i <= chunk_data.len() - BLOCK_SIZE {
-                        adler_hash_word = adler32(&chunk_data[i..i + BLOCK_SIZE]);
-                    } else {
-                        insert_data.extend_from_slice(&chunk_data[i..i - 1 + BLOCK_SIZE]);
-                        insert_data_len += BLOCK_SIZE - 1;
-                        i = chunk_data.len();
-                        break;
-                    }
-                }
-
-                // Insert instruction
-                let insert_instruction = &mut insert_data_len.to_ne_bytes()[..3];
-                insert_instruction[2] += 1 << 7;
-                delta_code.extend_from_slice(insert_instruction);
-                delta_code.extend_from_slice(&insert_data);
+                encode_insert_sequence(
+                    chunk_data,
+                    &mut i,
+                    word_hash_offsets,
+                    &mut delta_code,
+                    adler_hash_word
+                );
             } else {
                 let offset = *word_hash_offsets.get(&adler_hash_word).unwrap();
                 let mut equal_part_len = 0;
@@ -110,6 +94,7 @@ impl XdeltaEncoder {
         (0, processed_data, sbc_hash)
     }
 }
+
 impl Encoder for XdeltaEncoder {
     fn encode_cluster<D: Decoder, Hash: SBCHash>(
         &self,
@@ -150,15 +135,64 @@ impl Encoder for XdeltaEncoder {
     }
 }
 
+/// Encodes a matching sequence as a COPY instruction.
+///
+/// # Arguments
+/// * `parent_data` - Reference data where the match was found.
+/// * `chunk_data` - Current data being processed.
+/// * `i` - Current position in `chunk_data` (updated after execution).
+/// * `offset` - Position of the match in `parent_data`.
+/// * `delta_code` - Output buffer for delta instructions.
+fn encode_insert_sequence(
+    chunk_data: &[u8],
+    i: &mut usize,
+    word_hash_offsets: &HashMap<u32, usize>,
+    delta_code: &mut Vec<u8>,
+    initial_hash: u32,
+)   {
+    let start_position = *i;
+    if start_position >= chunk_data.len() {
+        return;
+    }
+
+    let mut insert_data = Vec::with_capacity(BLOCK_SIZE);
+    let mut current_pos = start_position;
+    let mut current_hash = initial_hash;
+
+    // Collect non-matching bytes until we find a match or reach end of data
+    while current_pos + BLOCK_SIZE <= chunk_data.len() {
+        if word_hash_offsets.contains_key(&current_hash) {
+            break;
+        }
+
+        insert_data.push(chunk_data[current_pos]);
+        current_pos += 1;
+
+        if current_pos + BLOCK_SIZE <= chunk_data.len() {
+            current_hash = adler32(&chunk_data[current_pos..current_pos + BLOCK_SIZE]);
+        } else {
+            break;
+        }
+    }
+
+    // Handle trailing bytes (less than BLOCK_SIZE remaining)
+    if current_pos < chunk_data.len() {
+        insert_data.extend_from_slice(&chunk_data[current_pos..]);
+        current_pos = chunk_data.len();
+    }
+
+    if !insert_data.is_empty() {
+        // Encode INSERT instruction (3-byte header + data)
+        let len_bytes = &mut (insert_data.len() as u32).to_ne_bytes()[..3];
+        // Set INSERT flag
+        len_bytes[2] |= 1 << 7;
+        delta_code.extend_from_slice(len_bytes);
+        delta_code.extend_from_slice(&insert_data);
+        *i = current_pos;
+    }
+}
+
 /// Computes the Adler-32 checksum for a given byte slice.
-///
-/// # Parameters
-///
-/// * `data` - Byte slice to compute checksum for.
-///
-/// # Returns
-///
-/// 32-bit Adler-32 checksum value.
 fn adler32(data: &[u8]) -> u32 {
     let mut a: u32 = 1;
     let mut b: u32 = 0;
