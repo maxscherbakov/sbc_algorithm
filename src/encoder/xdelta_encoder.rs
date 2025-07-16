@@ -23,10 +23,35 @@ impl Default for XdeltaEncoder {
 }
 
 impl XdeltaEncoder {
+    /// Creates a new XdeltaEncoder with specified compression settings.
+    ///
+    /// # Arguments
+    /// * `zstd_flag` - Whether to apply zstd compression to delta-encoded data:
+    ///   - `true`: Apply zstd compression (level 0).
+    ///   - `false`: Store raw delta instructions.
     pub fn new(zstd_flag: bool) -> Self {
         XdeltaEncoder { zstd_flag }
     }
 
+    /// Encodes a single chunk as delta against a parent chunk using xdelta algorithm.
+    ///
+    /// # Type Parameters
+    /// - `D`: Decoder implementation for chunk retrieval
+    /// - `Hash`: Hash type implementing SBCHash
+    ///
+    /// # Arguments
+    /// * `target_map` - Thread-safe reference to chunk storage.
+    /// * `chunk_data` - Raw data to encode.
+    /// * `hash` - Content hash of the chunk data.
+    /// * `parent_data` - Reference parent chunk data.
+    /// * `word_hash_offsets` - Precomputed block positions from parent.
+    /// * `parent_hash` - Hash of the parent chunk.
+    ///
+    /// # Returns
+    /// Tuple containing:
+    /// 1. `usize` - Always 0 (represents unused data)
+    /// 2. `usize` - Size of stored delta data (after optional compression)
+    /// 3. `SBCKey<Hash>` - Key where delta was stored
     fn encode_delta_chunk<D: Decoder, Hash: SBCHash>(
         &self,
         target_map: Arc<Mutex<&mut SBCMap<D, Hash>>>,
@@ -66,26 +91,29 @@ impl XdeltaEncoder {
             encode_insert_instruction(remaining_data, &mut delta_code);
         }
 
-        let mut target_map_lock = target_map.lock().unwrap();
-        let number_delta_chunk = count_delta_chunks_with_hash(&target_map_lock, &hash);
-        let sbc_hash = SBCKey {
+        let (processed_data, sbc_hash) = prepare_and_store_delta_chunk(
+            target_map,
             hash,
-            chunk_type: ChunkType::Delta {
-                parent_hash,
-                number: number_delta_chunk,
-            },
-        };
-
-        if self.zstd_flag {
-            delta_code = stream::encode_all(delta_code.as_slice(), 0).unwrap();
-        }
-        let processed_data = delta_code.len();
-        let _ = target_map_lock.insert(sbc_hash.clone(), delta_code);
+            parent_hash,
+            delta_code,
+            self.zstd_flag,
+        );
         (0, processed_data, sbc_hash)
     }
 }
 
 impl Encoder for XdeltaEncoder {
+    /// Encodes a cluster of data chunks using Xdelta compression against a parent chunk.
+    ///
+    /// # Arguments
+    /// * `target_map` - Thread-safe reference to the chunk storage map (Arc<Mutex>).
+    /// * `cluster` - Mutable slice of ClusterPoints to process.
+    /// * `parent_hash` - Hash of the suggested parent chunk for delta reference.
+    ///
+    /// # Returns
+    /// A tuple containing:
+    /// 1. `usize` - Total bytes of data that couldn't be delta-encoded (left as-is).
+    /// 2. `usize` - Total bytes of processed delta-encoded data.
     fn encode_cluster<D: Decoder, Hash: SBCHash>(
         &self,
         target_map: Arc<Mutex<&mut SBCMap<D, Hash>>>,
@@ -123,6 +151,48 @@ impl Encoder for XdeltaEncoder {
         }
         (data_left, processed_data)
     }
+}
+
+/// Prepares and stores a delta-encoded chunk in the shared chunk map.
+///
+/// # Arguments
+/// * `target_map` - Thread-safe reference to the chunk storage map (Arc<Mutex>).
+/// * `hash` - Content hash of the original chunk data.
+/// * `parent_hash` - Hash of the parent chunk this delta is based on.
+/// * `delta_code` - Raw delta-encoded data to store.
+/// * `zstd_flag` - Whether to apply zstd compression to the delta data.
+///
+/// # Returns
+/// A tuple containing:
+/// 1. `usize` - Final size of the stored data (after optional compression).
+/// 2. `SBCKey<Hash>` - Key under which the chunk was stored.
+fn prepare_and_store_delta_chunk<D: Decoder, Hash: SBCHash>(
+    target_map: Arc<Mutex<&mut SBCMap<D, Hash>>>,
+    hash: Hash,
+    parent_hash: Hash,
+    delta_code: Vec<u8>,
+    zstd_flag: bool,
+) -> (usize, SBCKey<Hash>) {
+    let mut target_map_lock = target_map.lock().unwrap();
+    let number_delta_chunk = count_delta_chunks_with_hash(&target_map_lock, &hash);
+    let sbc_hash = SBCKey {
+        hash,
+        chunk_type: ChunkType::Delta {
+            parent_hash,
+            number: number_delta_chunk,
+        },
+    };
+
+    let delta_code = if zstd_flag {
+        stream::encode_all(delta_code.as_slice(), 0).unwrap()
+    } else {
+        delta_code
+    };
+
+    let processed_data = delta_code.len();
+    let _ = target_map_lock.insert(sbc_hash.clone(), delta_code);
+
+    (processed_data, sbc_hash)
 }
 
 /// Encodes a matching sequence as a COPY instruction.
