@@ -351,6 +351,8 @@ mod test {
     use crate::encoder::encode_simple_chunk;
     use crate::hasher::AronovichHash;
 
+    const TEST_DATA_SIZE: usize = 8192;
+
     #[test]
     fn create_block_hashmap_should_return_empty_map_for_data_shorter_than_16_bytes() {
         let short_data = [0u8; 15];
@@ -487,7 +489,7 @@ mod test {
         encode_copy_sequence(&parent, &chunk, &mut i, &mut delta, hash, &word_hash_offsets);
 
         assert_eq!(i, 24);
-        assert_eq!(delta[..3], (24u32).to_ne_bytes()[..3]);
+        assert_eq!(delta[..3], 24u32.to_ne_bytes()[..3]);
         assert_eq!(delta[3..6], 8u32.to_ne_bytes()[..3]);
     }
 
@@ -540,7 +542,7 @@ mod test {
 
     #[test]
     fn test_restore_similarity_chunk_1_byte_diff() {
-        let mut data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let mut data: Vec<u8> = generate_test_data();
         let data2 = data.clone();
         if data[15] < 255 {
             data[15] = 255;
@@ -555,7 +557,7 @@ mod test {
 
     #[test]
     fn test_restore_similarity_chunk_2_neighbor_byte_diff() {
-        let mut data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let mut data: Vec<u8> = generate_test_data();
         let data2 = data.clone();
         if data[15] < 255 {
             data[15] = 255;
@@ -575,7 +577,7 @@ mod test {
 
     #[test]
     fn test_restore_similarity_chunk_2_byte_diff() {
-        let mut data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let mut data: Vec<u8> = generate_test_data();
         let data2 = data.clone();
         if data[15] < 255 {
             data[15] = 255;
@@ -595,7 +597,7 @@ mod test {
 
     #[test]
     fn test_restore_similarity_chunk_with_offset_left() {
-        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let data: Vec<u8> = generate_test_data();
         let data2 = data[15..].to_vec();
 
         let (sbc_map, sbc_key) = create_map_and_key(data.as_slice(), data2.as_slice());
@@ -605,7 +607,7 @@ mod test {
 
     #[test]
     fn test_restore_similarity_chunk_with_offset_right() {
-        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let data: Vec<u8> = generate_test_data();
         let data2 = data[..8000].to_vec();
 
         let (sbc_map, sbc_key) = create_map_and_key(data.as_slice(), data2.as_slice());
@@ -615,7 +617,7 @@ mod test {
 
     #[test]
     fn test_restore_similarity_chunk_with_offset() {
-        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let data: Vec<u8> = generate_test_data();
         let mut data2 = data[15..8000].to_vec();
         data2[0] /= 3;
         data2[7000] /= 3;
@@ -627,7 +629,7 @@ mod test {
 
     #[test]
     fn test_restore_similarity_chunk_with_cyclic_shift_right() {
-        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let data: Vec<u8> = generate_test_data();
         let mut data2 = data.clone();
         data2.extend(&data[8000..]);
 
@@ -646,7 +648,7 @@ mod test {
 
     #[test]
     fn test_restore_similarity_chunk_with_cyclic_shift_left() {
-        let data: Vec<u8> = (0..8192).map(|_| rand::random::<u8>()).collect();
+        let data: Vec<u8> = generate_test_data();
         let mut data2 = data[..192].to_vec();
         data2.extend(&data);
 
@@ -661,6 +663,10 @@ mod test {
             }
         );
         assert_eq!(sbc_map.get(&sbc_key).unwrap(), data2);
+    }
+
+    fn generate_test_data() -> Vec<u8> {
+        (0..TEST_DATA_SIZE).map(|_| rand::random::<u8>()).collect()
     }
 
     fn create_map_and_key<'a>(
