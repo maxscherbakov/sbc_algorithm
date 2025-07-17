@@ -73,7 +73,7 @@ impl XdeltaEncoder {
                     &mut i,
                     word_hash_offsets,
                     &mut delta_code,
-                    adler_hash_word
+                    adler_hash_word,
                 );
             } else {
                 encode_copy_sequence(
@@ -82,7 +82,7 @@ impl XdeltaEncoder {
                     &mut i,
                     &mut delta_code,
                     adler_hash_word,
-                    word_hash_offsets
+                    word_hash_offsets,
                 )
             }
         }
@@ -211,7 +211,7 @@ fn encode_copy_sequence(
     delta_code: &mut Vec<u8>,
     initial_hash: u32,
     word_hash_offsets: &HashMap<u32, usize>,
-)   {
+) {
     if *i >= chunk_data.len() || !word_hash_offsets.contains_key(&initial_hash) {
         return;
     }
@@ -242,7 +242,11 @@ fn encode_copy_sequence(
 /// * `equal_part_len` - Length of the data to copy (must be ≤ 2^24-1).
 /// * `copy_instruction_offset` - Offset in the source data where the matching block begins (must be ≤ 2^24-1).
 /// * `delta_code` - Output buffer where the encoded instruction will be appended.
-fn encode_copy_instruction(equal_part_len : usize, copy_instruction_offset : usize, delta_code : &mut Vec<u8>) {
+fn encode_copy_instruction(
+    equal_part_len: usize,
+    copy_instruction_offset: usize,
+    delta_code: &mut Vec<u8>,
+) {
     let copy_instruction_len = &equal_part_len.to_ne_bytes()[..3];
     let copy_instruction_offset = &copy_instruction_offset.to_ne_bytes()[..3];
     delta_code.extend_from_slice(copy_instruction_len);
@@ -263,8 +267,8 @@ fn encode_insert_sequence(
     word_hash_offsets: &HashMap<u32, usize>,
     delta_code: &mut Vec<u8>,
     initial_hash: u32,
-)   {
-    if *i >= chunk_data.len() ||  word_hash_offsets.contains_key(&initial_hash) {
+) {
+    if *i >= chunk_data.len() || word_hash_offsets.contains_key(&initial_hash) {
         return;
     }
 
@@ -302,7 +306,7 @@ fn encode_insert_sequence(
 ///   Maximum length supported is 2^23-1 bytes.
 /// * `delta_code` - Output buffer where the encoded instruction will be appended.
 ///   Must have enough capacity for 3 + insert_data.len() bytes.
-fn encode_insert_instruction(insert_data : Vec<u8>, delta_code: &mut Vec<u8>) {
+fn encode_insert_instruction(insert_data: Vec<u8>, delta_code: &mut Vec<u8>) {
     let len_bytes = &mut (insert_data.len() as u32).to_ne_bytes()[..3];
     len_bytes[2] |= 1 << 7;
     delta_code.extend_from_slice(len_bytes);
@@ -383,7 +387,13 @@ mod test {
         let mut i = 0;
 
         let adler_hash = adler32(&chunk_data[i..i + BLOCK_SIZE]);
-        encode_insert_sequence(&chunk_data, &mut i, &word_hash_offsets, &mut delta_code, adler_hash);
+        encode_insert_sequence(
+            &chunk_data,
+            &mut i,
+            &word_hash_offsets,
+            &mut delta_code,
+            adler_hash,
+        );
 
         assert_eq!(i, chunk_data.len());
 
@@ -402,7 +412,13 @@ mod test {
         let mut i = 0;
 
         let adler_hash = 0;
-        encode_insert_sequence(&chunk_data, &mut i, &word_hash_offsets, &mut delta_code, adler_hash);
+        encode_insert_sequence(
+            &chunk_data,
+            &mut i,
+            &word_hash_offsets,
+            &mut delta_code,
+            adler_hash,
+        );
         assert_eq!(i, chunk_data.len());
 
         let header = &delta_code[..3];
@@ -422,7 +438,13 @@ mod test {
         let mut delta_code = Vec::new();
         let mut i = 0;
 
-        encode_insert_sequence(&chunk_data, &mut i, &word_hash_offsets, &mut delta_code, hash);
+        encode_insert_sequence(
+            &chunk_data,
+            &mut i,
+            &word_hash_offsets,
+            &mut delta_code,
+            hash,
+        );
 
         assert!(delta_code.is_empty());
         assert_eq!(i, 0);
@@ -442,7 +464,13 @@ mod test {
         let mut i = 0;
 
         let initial_hash = adler32(&chunk_data[i..i + BLOCK_SIZE]);
-        encode_insert_sequence(&chunk_data, &mut i, &word_hash_offsets, &mut delta_code, initial_hash);
+        encode_insert_sequence(
+            &chunk_data,
+            &mut i,
+            &word_hash_offsets,
+            &mut delta_code,
+            initial_hash,
+        );
 
         let mut expected = vec![4, 0, 0x80];
         expected.extend_from_slice(&[1, 2, 3, 4]);
@@ -484,9 +512,16 @@ mod test {
 
         let mut i = 0;
         let mut delta = vec![];
-        let hash = adler32(&chunk[i..i+BLOCK_SIZE]);
+        let hash = adler32(&chunk[i..i + BLOCK_SIZE]);
 
-        encode_copy_sequence(&parent, &chunk, &mut i, &mut delta, hash, &word_hash_offsets);
+        encode_copy_sequence(
+            &parent,
+            &chunk,
+            &mut i,
+            &mut delta,
+            hash,
+            &word_hash_offsets,
+        );
 
         assert_eq!(i, 24);
         assert_eq!(delta[..3], 24u32.to_ne_bytes()[..3]);
@@ -503,7 +538,14 @@ mod test {
         let mut i = 0;
         let mut delta = vec![];
 
-        encode_copy_sequence(&parent, &chunk, &mut i, &mut delta, hash, &word_hash_offsets);
+        encode_copy_sequence(
+            &parent,
+            &chunk,
+            &mut i,
+            &mut delta,
+            hash,
+            &word_hash_offsets,
+        );
 
         assert_eq!(i, BLOCK_SIZE);
     }
@@ -518,7 +560,14 @@ mod test {
         let mut delta = vec![];
         let invalid_hash = adler32(b"invalid_block____");
 
-        encode_copy_sequence(&parent, &chunk, &mut i, &mut delta, invalid_hash, &word_hash_offsets);
+        encode_copy_sequence(
+            &parent,
+            &chunk,
+            &mut i,
+            &mut delta,
+            invalid_hash,
+            &word_hash_offsets,
+        );
 
         assert!(delta.is_empty());
         assert_eq!(i, 0);
@@ -534,7 +583,14 @@ mod test {
         let mut delta = vec![];
         let hash = adler32(&[0; BLOCK_SIZE]);
 
-        encode_copy_sequence(&parent, &chunk, &mut i, &mut delta, hash, &word_hash_offsets);
+        encode_copy_sequence(
+            &parent,
+            &chunk,
+            &mut i,
+            &mut delta,
+            hash,
+            &word_hash_offsets,
+        );
 
         assert!(delta.is_empty());
         assert_eq!(i, chunk.len());
