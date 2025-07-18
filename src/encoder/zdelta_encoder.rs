@@ -8,6 +8,11 @@ use crate::encoder::Encoder;
 
 const MIN_MATCH_LENGTH: usize = 3;
 
+type Triplet = [u8; 3];
+type TripletHash = u32;
+type PositionInChunk = usize;
+type TripletLocations = Vec<PositionInChunk>;
+
 pub struct ZdeltaEncoder {
     use_huffman_encoding: bool,
 }
@@ -47,12 +52,24 @@ impl Encoder for ZdeltaEncoder {
     }
 }
 
-fn calculate_triplet_hash(triplet: &[u8]) -> Result<u32, &'static str> {
-    if triplet.len() != MIN_MATCH_LENGTH {
-        return Err("Invalid triplet length");
+fn compute_triplet_hash(triplet: &Triplet) -> TripletHash {
+    ((triplet[0] as u32) << 16) | ((triplet[1] as u32) << 8) | triplet[2] as u32
+}
+
+fn build_triplet_lookup_table(chunk: &[u8]) -> HashMap<TripletHash, TripletLocations> {
+    let mut lookup_table : HashMap<TripletHash, TripletLocations> = HashMap::new();
+
+    for (current_position, triplet) in chunk.windows(MIN_MATCH_LENGTH).enumerate() {
+        let triplet_array: Triplet = triplet.try_into().unwrap();
+        let hash = compute_triplet_hash(&triplet_array);
+
+        lookup_table
+            .entry(hash)
+            .or_default()
+            .push(current_position);
     }
 
-    Ok(((triplet[0] as u32) << 16) | ((triplet[1] as u32) << 8) | triplet[2] as u32)
+    lookup_table
 }
 
 #[cfg(test)]
@@ -60,29 +77,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn calculate_triplet_hash_should_return_correct_hash_for_normal_triplet() {
-        let data = &[1, 2, 3];
-        assert_eq!(calculate_triplet_hash(data), Ok(0x010203));
-    }
+    fn build_triplet_lookup_table_should_handles_duplicate_triplets_correctly() {
+        let data = b"abcabcabc";
+        let table = build_triplet_lookup_table(data);
 
-    #[test]
-    fn calculate_triplet_hash_should_return_error_for_triplet_of_wrong_size() {
-        let data = &[1, 2];
+        assert_eq!(table.len(), 3);
+
         assert_eq!(
-            calculate_triplet_hash(data),
-            Err("Invalid triplet length")
+            table.get(&compute_triplet_hash(b"abc")),
+            Some(&vec![0, 3, 6])
+        );
+        assert_eq!(
+            table.get(&compute_triplet_hash(b"bca")),
+            Some(&vec![1, 4])
+        );
+        assert_eq!(
+            table.get(&compute_triplet_hash(b"cab")),
+            Some(&vec![2, 5])
         );
     }
 
     #[test]
-    fn calculate_triplet_hash_should_return_correct_hash_for_edge_case_values() {
+    fn compute_triplet_hash_should_return_correct_hash_for_normal_triplet() {
+        let data : Triplet = [1, 2, 3];
+        assert_eq!(compute_triplet_hash(&data), 0x010203);
+    }
+
+    #[test]
+    fn compute_triplet_hash_should_return_correct_hash_for_edge_case_values() {
         assert_eq!(
-            calculate_triplet_hash(&[0, 0, 0]),
-            Ok(0x000000)
+            compute_triplet_hash(&[0, 0, 0]),
+            0x000000
         );
         assert_eq!(
-            calculate_triplet_hash(&[255, 255, 255]),
-            Ok(0xFFFFFF)
+            compute_triplet_hash(&[255, 255, 255]),
+            0xFFFFFF
         );
     }
 }
