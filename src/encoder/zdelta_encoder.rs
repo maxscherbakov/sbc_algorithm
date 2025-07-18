@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use chunkfs::Data;
 use crate::decoder::Decoder;
 use crate::hasher::SBCHash;
 use crate::{SBCKey, SBCMap};
 use crate::chunkfs_sbc::ClusterPoint;
-use crate::encoder::Encoder;
+use crate::encoder::{get_parent_data, Encoder};
 
 const MIN_MATCH_LENGTH: usize = 3;
 
@@ -34,7 +35,7 @@ impl ZdeltaEncoder {
         chunk_data: &[u8],
         hash: Hash,
         parent_data: &[u8],
-        word_hash_offsets: &HashMap<u32, usize>,
+        parent_triplet_lookup_table: &HashMap<TripletHash, TripletLocations>,
         parent_hash: Hash,
     ) -> (usize, usize, SBCKey<Hash>) {
         todo!();
@@ -48,7 +49,36 @@ impl Encoder for ZdeltaEncoder {
         cluster: &mut [ClusterPoint<Hash>],
         parent_hash: Hash
     ) -> (usize, usize) {
-        todo!()
+        let parent_info = get_parent_data(target_map.clone(), parent_hash.clone(), cluster);
+        let mut data_left = parent_info.data_left;
+        let mut total_processed_bytes = 0;
+        let parent_data = parent_info.parent_data;
+        let parent_triplet_lookup_table = build_triplet_lookup_table(&parent_data);
+
+        for (chunk_id, (hash, data_container)) in cluster.iter_mut().enumerate() {
+            if parent_info.index > -1 && chunk_id == parent_info.index as usize {
+                continue;
+            }
+            let mut target_hash = SBCKey::default();
+            match data_container.extract() {
+                Data::Chunk(data) => {
+                    let (left, processed, sbc_hash) = self.encode_delta_chunk(
+                        target_map.clone(),
+                        data,
+                        hash.clone(),
+                        parent_data.as_slice(),
+                        &parent_triplet_lookup_table,
+                        parent_hash.clone(),
+                    );
+                    data_left += left;
+                    total_processed_bytes += processed;
+                    target_hash = sbc_hash;
+                }
+                Data::TargetChunk(_) => {}
+            }
+            data_container.make_target(vec![target_hash]);
+        }
+        (data_left, total_processed_bytes)
     }
 }
 
