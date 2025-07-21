@@ -11,6 +11,9 @@ chunkfs = "0.1"
 futures = "0.3"
 rayon = "1.10"
 zstd = "0.13"
+thiserror = "2.0.12"
+huffman-compress = "0.6.1"
+bit-vec = "0.6.3"
 
 [dev-dependencies]
 rand = "0.8.5"
