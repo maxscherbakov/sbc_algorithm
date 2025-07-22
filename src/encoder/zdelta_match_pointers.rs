@@ -56,9 +56,6 @@ impl MatchPointers {
     /// - For small offsets (< SMALL_OFFSET_THRESHOLD), moves the pointer that was used.
     /// - For large offsets, moves the other pointer.
     /// - Target pointer is always moved to match end position.
-    ///
-    /// # Errors
-    /// Returns `PointerError::PositionOverflow` if match_end_position would cause overflow.
     pub fn update_after_match(
         &mut self,
         match_end_position: usize,
@@ -83,6 +80,43 @@ impl MatchPointers {
             }
         }
     }
+
+    pub fn smart_update_after_match(
+        &mut self,
+        match_end_position: usize,
+        offset: i16,
+        pointer_type: ReferencePointerType,
+        previous_match_offset: Option<i16>
+    ) {
+        match pointer_type {
+            ReferencePointerType::TargetLocal => {
+                self.target_ptr = match_end_position;
+            },
+            _ => {
+                if let Some(prev_offset) = previous_match_offset {
+                    if prev_offset.abs() < SMALL_OFFSET_THRESHOLD && offset.abs() < SMALL_OFFSET_THRESHOLD {
+                        match pointer_type {
+                            ReferencePointerType::Main => self.main_ref_ptr = match_end_position,
+                            ReferencePointerType::Auxiliary => self.auxiliary_ref_ptr = match_end_position,
+                            _ => {}
+                        }
+                    } else {
+                        match pointer_type {
+                            ReferencePointerType::Main => self.auxiliary_ref_ptr = match_end_position,
+                            ReferencePointerType::Auxiliary => self.main_ref_ptr = match_end_position,
+                            _ => {}
+                        }
+                    }
+                } else {
+                    match pointer_type {
+                        ReferencePointerType::Main => self.main_ref_ptr = match_end_position,
+                        ReferencePointerType::Auxiliary => self.auxiliary_ref_ptr = match_end_position,
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl Default for MatchPointers {
@@ -94,6 +128,77 @@ impl Default for MatchPointers {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn smart_update_after_match_should_update_target_ptr_for_target_local_matches() {
+        let mut pointers = MatchPointers::new(100, 200, 300);
+        pointers.smart_update_after_match(150, -50, ReferencePointerType::TargetLocal, None);
+        assert_eq!(pointers.target_ptr, 150);
+        assert_eq!(pointers.main_ref_ptr, 200);
+        assert_eq!(pointers.auxiliary_ref_ptr, 300);
+    }
+
+    #[test]
+    fn smart_update_after_match_should_update_main_ptr_for_consecutive_small_offsets() {
+        let mut pointers = MatchPointers::new(100, 200, 300);
+        pointers.smart_update_after_match(250, 50, ReferencePointerType::Main, Some(30));
+        assert_eq!(pointers.main_ref_ptr, 250);
+        assert_eq!(pointers.auxiliary_ref_ptr, 300);
+    }
+
+    #[test]
+    fn smart_update_after_match_should_update_auxiliary_ptr_for_consecutive_small_offsets() {
+        let mut pointers = MatchPointers::new(100, 200, 300);
+        pointers.smart_update_after_match(350, 50, ReferencePointerType::Auxiliary, Some(40));
+        assert_eq!(pointers.auxiliary_ref_ptr, 350);
+        assert_eq!(pointers.main_ref_ptr, 200);
+    }
+
+    #[test]
+    fn smart_update_after_match_should_update_auxiliary_ptr_for_large_offset_after_small_offset() {
+        let mut pointers = MatchPointers::new(100, 200, 300);
+        pointers.smart_update_after_match(500, 300, ReferencePointerType::Main, Some(50));
+        assert_eq!(pointers.auxiliary_ref_ptr, 500);
+        assert_eq!(pointers.main_ref_ptr, 200);
+    }
+
+    #[test]
+    fn smart_update_after_match_should_update_main_ptr_for_large_offset_after_small_offset() {
+        let mut pointers = MatchPointers::new(100, 200, 300);
+        pointers.smart_update_after_match(600, 300, ReferencePointerType::Auxiliary, Some(60));
+        assert_eq!(pointers.main_ref_ptr, 600);
+        assert_eq!(pointers.auxiliary_ref_ptr, 300);
+    }
+
+    #[test]
+    fn smart_update_after_match_should_update_used_pointer_when_no_previous_offset() {
+        let mut pointers = MatchPointers::new(100, 200, 300);
+        pointers.smart_update_after_match(400, 200, ReferencePointerType::Main, None);
+        assert_eq!(pointers.main_ref_ptr, 400);
+        pointers.smart_update_after_match(500, 200, ReferencePointerType::Auxiliary, None);
+        assert_eq!(pointers.auxiliary_ref_ptr, 500);
+    }
+
+    #[test]
+    fn smart_update_after_match_should_handle_edge_case_positions_correctly() {
+        let mut pointers = MatchPointers::new(100, 200, 300);
+        pointers.smart_update_after_match(usize::MAX, 32767, ReferencePointerType::Main, Some(256));
+        assert_eq!(pointers.auxiliary_ref_ptr, usize::MAX);
+    }
+
+    #[test]
+    fn smart_update_after_match_should_handle_negative_offsets_correctly() {
+        let mut pointers = MatchPointers::new(1000, 2000, 3000);
+        pointers.smart_update_after_match(2500, -500, ReferencePointerType::Main, Some(-200));
+        assert_eq!(pointers.auxiliary_ref_ptr, 2500);
+    }
+
+    #[test]
+    fn smart_update_after_match_should_maintain_pointer_integrity_for_zero_offsets() {
+        let mut pointers = MatchPointers::new(100, 200, 200);
+        pointers.smart_update_after_match(300, 0, ReferencePointerType::Main, Some(0));
+        assert!(pointers.main_ref_ptr == 300 || pointers.auxiliary_ref_ptr == 300);
+    }
 
     #[test]
     fn update_after_match_should_update_target_ptr_for_target_local_matches() {

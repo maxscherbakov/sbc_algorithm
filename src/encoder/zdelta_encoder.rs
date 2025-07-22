@@ -21,6 +21,8 @@ const MAX_MATCH_LENGTH: usize = 1026;
 const LENGTH_BLOCK_SIZE: usize = 256;
 /// Maximum coefficient value for match length encoding.
 const MAX_LENGTH_COEFFICIENT: u8 = 3;
+const HASH_TABLE_SIZE: usize = 65536;
+const MAX_HASH_CHAIN_LENGTH: usize = 1024;
 
 /// A 3-byte sequence used for finding matches.
 type Triplet = [u8; 3];
@@ -109,7 +111,9 @@ impl ZdeltaEncoder {
     /// # Arguments
     /// * `use_huffman_encoding` - Whether to use Huffman encoding for the delta.
     pub fn new(use_huffman_encoding: bool) -> Self {
-        Self { use_huffman_encoding }
+        Self {
+            use_huffman_encoding
+        }
     }
 
     /// Encodes a single data chunk using delta compression against a reference.
@@ -144,6 +148,7 @@ impl ZdeltaEncoder {
         let mut delta_code : Vec<u8> = Vec::new();
         let mut uncompressed_data = 0;
         let mut pointers = MatchPointers::new(0, 0, 0);
+        let mut previous_match_offset: Option<i16> = None;
 
         let huffman_book = if self.use_huffman_encoding {
             Some(create_default_huffman_book())
@@ -205,7 +210,8 @@ impl ZdeltaEncoder {
                         }
                     }
 
-                    pointers.update_after_match(i + length, offset, pointer_type);
+                    pointers.smart_update_after_match(i + length, offset, pointer_type, previous_match_offset);
+                    previous_match_offset = Some(offset);
                     i += length;
                     continue;
                 }
@@ -620,16 +626,16 @@ fn build_triplet_lookup_table(chunk: &[u8]) -> Result<HashMap<TripletHash, Tripl
         });
     }
 
-    let mut lookup_table : HashMap<TripletHash, TripletLocations> = HashMap::new();
+    let mut lookup_table : HashMap<TripletHash, TripletLocations> = HashMap::with_capacity(HASH_TABLE_SIZE);
 
     for (current_position, triplet) in chunk.windows(MIN_MATCH_LENGTH).enumerate() {
         let triplet_array = [triplet[0], triplet[1], triplet[2]];
         let hash = compute_triplet_hash(&triplet_array);
 
-        lookup_table
-            .entry(hash)
-            .or_default()
-            .push(current_position);
+        let entry = lookup_table.entry(hash).or_default();
+        if entry.len() < MAX_HASH_CHAIN_LENGTH {
+            entry.push(current_position);
+        }
     }
 
     Ok(lookup_table)
