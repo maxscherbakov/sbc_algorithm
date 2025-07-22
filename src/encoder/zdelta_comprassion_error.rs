@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+/// Error types related to zdelta encoding operations.
 #[derive(Debug, Error)]
 pub enum ZdeltaCompressionError {
     #[error("Match encoding error: {0}")]
@@ -15,15 +16,23 @@ pub enum ZdeltaCompressionError {
     Pointer(#[from] PointerError),
 }
 
+/// Errors related to data format and conversion.
+///
+/// These errors occur when input data doesn't meet requirements for processing.
 #[derive(Debug, Error)]
 pub enum DataConversionError {
     #[error("Chunk too small: got {actual_size} bytes, need at least {required_size}")]
     ChunkTooSmall {
+        /// Actual size of provided data chunk.
         actual_size: usize,
+        /// Minimum required size for processing
         required_size: usize,
     },
 }
 
+/// Errors related to storage operations and IO.
+///
+/// These errors occur during interaction with storage systems and locks.
 #[derive(Debug, Error)]
 pub enum StorageError {
     #[error("Lock acquisition failed: {0}")]
@@ -33,6 +42,9 @@ pub enum StorageError {
     InsertionFailed(String),
 }
 
+/// Errors related to match encoding operations.
+///
+/// These errors occur during the encoding of matches between target and reference data.
 #[derive(Debug, Error, PartialEq)]
 pub enum MatchEncodingError {
     #[error("Invalid match length {0} (allowed {1}-{2})")]
@@ -48,7 +60,9 @@ pub enum MatchEncodingError {
     HuffmanBookNotInitialized,
 }
 
-/// Error type for pointer operations
+/// Errors related to pointer management.
+///
+/// These errors occur when pointer positions become invalid during compression.
 #[derive(Debug, Error, PartialEq)]
 pub enum PointerError {
     #[error("Match end position would cause overflow")]

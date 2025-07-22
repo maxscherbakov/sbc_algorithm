@@ -48,6 +48,17 @@ impl Default for ZdeltaEncoder {
 }
 
 impl Encoder for ZdeltaEncoder {
+    /// Encodes a cluster of data chunks using Zdelta compression against a parent chunk.
+    ///
+    /// # Arguments
+    /// * `target_map` - Thread-safe reference to the chunk storage map (Arc<Mutex>).
+    /// * `cluster` - Mutable slice of ClusterPoints to process.
+    /// * `parent_hash` - Hash of the suggested parent chunk for delta reference.
+    ///
+    /// # Returns
+    /// A tuple containing:
+    /// 1. `usize` - Total bytes of data that couldn't be delta-encoded (left as-is).
+    /// 2. `usize` - Total bytes of processed delta-encoded data.
     fn encode_cluster<D: Decoder, Hash: SBCHash>(
         &self,
         target_map: Arc<Mutex<&mut SBCMap<D, Hash>>>,
@@ -61,7 +72,7 @@ impl Encoder for ZdeltaEncoder {
         let parent_triplet_lookup_table = match build_triplet_lookup_table(&parent_data) {
             Ok(triplet_lookup_table) => triplet_lookup_table,
             Err(_) => {
-                todo!()
+                panic!("Chunk is too small (Chunk size should be at least three bytes)")
             }
         };
 
@@ -347,6 +358,14 @@ fn create_default_huffman_book() -> Book<u8> {
     book
 }
 
+/// Encodes a literal byte using Huffman coding.
+///
+/// # Arguments
+/// * `literal` - The byte value to encode.
+/// * `book` - Huffman code book for encoding.
+///
+/// # Returns
+/// Encoded bytes or error if encoding fails.
 fn encode_literal_huffman(
     literal: u8,
     book: &Book<u8>,
@@ -359,6 +378,18 @@ fn encode_literal_huffman(
     Ok(buffer.to_bytes())
 }
 
+/// Encodes a match using raw byte representation (without Huffman coding).
+///
+/// # Arguments
+/// * `match_length` - Length of the match (3-1026 bytes).
+/// * `offset` - Signed offset from reference pointer.
+/// * `pointer_type` - Which reference pointer was used.
+///
+/// # Encoding Format
+/// 1. Flag byte.
+/// 2. Length remainder byte.
+/// 3. Offset high byte.
+/// 4. Offset low byte.
 fn encode_match_raw(
     match_length: usize,
     offset: i16,
@@ -383,6 +414,14 @@ fn encode_match_raw(
     Ok(vec![flag, length_remainder, offset_high, offset_low])
 }
 
+/// Calculates length components for match encoding.
+///
+/// Splits match length into:
+/// - Remainder (0-255).
+/// - Coefficient (0-3).
+///
+/// # Returns
+/// Tuple of (remainder, coefficient).
 fn calculate_length_components(match_length: usize) -> (u8, u8) {
     let effective_length = match_length.max(MIN_MATCH_LENGTH) - MIN_MATCH_LENGTH;
 
@@ -396,6 +435,22 @@ fn calculate_length_components(match_length: usize) -> (u8, u8) {
     }
 }
 
+/// Encodes match flag combining length coefficient, pointer type and direction.
+///
+/// # Arguments
+/// * `length_coefficient` - Length coefficient (0-3).
+/// * `pointer_type` - Which pointer was used.
+/// * `is_positive_offset` - Whether offset is positive.
+///
+/// # Returns
+/// Encoded flag byte or error for invalid combination.
+///
+/// # Flag Encoding
+/// Each unique combination maps to a value 1-20:
+/// - First 5 values: coefficient 0.
+/// - Next 5: coefficient 1.
+/// - Next 5: coefficient 2.
+/// - Last 5: coefficient 3.
 fn encode_match_flag(
     length_coefficient: u8,
     pointer_type: &ReferencePointerType,
@@ -426,6 +481,22 @@ fn encode_match_flag(
     }
 }
 
+/// Selects the best match from possible candidate positions.
+///
+/// Uses scoring system that considers both match length and offset:
+/// - Longer matches score higher.
+/// - Smaller offsets score higher.
+/// - Large offsets (>4096) get length penalty.
+///
+/// # Arguments
+/// * `target_data` - Data being compressed.
+/// * `parent_data` - Reference data.
+/// * `current_position` - Position in target data.
+/// * `parent_positions` - Candidate match positions in reference.
+/// * `pointers` - Current pointer positions.
+///
+/// # Returns
+/// Best match (length, offset, pointer_type) or None if no good matches.
 fn select_best_match(
     target_data: &[u8],
     parent_data: &[u8],
@@ -500,10 +571,15 @@ fn find_max_match_length(
     Some(match_length)
 }
 
+/// Computes hash value for a 3-byte sequence.
 fn compute_triplet_hash(triplet: &Triplet) -> TripletHash {
     ((triplet[0] as u32) << 16) | ((triplet[1] as u32) << 8) | triplet[2] as u32
 }
 
+/// Builds lookup table mapping triplets to their positions in data.
+///
+/// # Returns
+/// Hash map of triplet hashes to positions or error if data too small
 fn build_triplet_lookup_table(chunk: &[u8]) -> Result<HashMap<TripletHash, TripletLocations>, DataConversionError> {
     if chunk.len() < MIN_MATCH_LENGTH {
         return Err(DataConversionError::ChunkTooSmall {
