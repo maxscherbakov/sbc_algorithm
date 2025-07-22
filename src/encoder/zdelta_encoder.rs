@@ -9,7 +9,7 @@ use crate::{ChunkType, SBCKey, SBCMap};
 use crate::chunkfs_sbc::ClusterPoint;
 use crate::encoder::{count_delta_chunks_with_hash, get_parent_data, Encoder};
 use crate::encoder::zdelta_match_pointers::{MatchPointers, ReferencePointerType};
-use crate::encoder::zdelta_comprassion_error::{ZdeltaCompressionError, DataConversionError, StorageError, MatchEncodingError};
+use crate::encoder::zdelta_comprassion_error::{DataConversionError, StorageError, MatchEncodingError};
 
 /// Threshold for applying penalty to large offsets during match selection.
 const LARGE_OFFSET_PENALTY_THRESHOLD: i32 = 4096;
@@ -90,7 +90,7 @@ impl Encoder for ZdeltaEncoder {
                         parent_data.as_slice(),
                         &parent_triplet_lookup_table,
                         parent_hash.clone(),
-                    ).unwrap();
+                    );
                     data_left += left;
                     total_processed_bytes += processed;
                     target_hash = sbc_hash;
@@ -140,7 +140,7 @@ impl ZdeltaEncoder {
         parent_data: &[u8],
         parent_triplet_lookup_table: &HashMap<TripletHash, TripletLocations>,
         parent_hash: Hash,
-    ) -> Result<(usize, usize, SBCKey<Hash>), ZdeltaCompressionError> {
+    ) -> (usize, usize, SBCKey<Hash>) {
         let mut delta_code : Vec<u8> = Vec::new();
         let mut uncompressed_data = 0;
         let mut pointers = MatchPointers::new(0, 0, 0);
@@ -160,21 +160,52 @@ impl ZdeltaEncoder {
             if let Some(parent_positions) = parent_triplet_lookup_table.get(&hash) {
                 if let Some((length, offset, pointer_type)) =
                     select_best_match(target_data, parent_data, i, parent_positions, &pointers) {
-                    if self.use_huffman_encoding {
-                        let encoded = encode_match_huffman(
-                            length,
-                            offset,
-                            &pointer_type,
-                            huffman_book.as_ref().ok_or(MatchEncodingError::HuffmanBookNotInitialized)?,
-                        )?;
+                    if let Some(book) = huffman_book.as_ref() {
+                        match encode_match_huffman(length, offset, &pointer_type, book) {
+                            Ok(encoded) => {
+                                delta_code.extend_from_slice(&encoded);
+                            }
+                            Err(_) => {
+                                log::warn!("Invalid match length \
+                                (allowed: {MIN_MATCH_LENGTH}-{MAX_MATCH_LENGTH}), \
+                                falling back to literal encoding");
 
-                        delta_code.extend_from_slice(&encoded);
+                                for &byte in &target_data[i..i+length] {
+                                    self.encode_literal(
+                                        byte,
+                                        &huffman_book,
+                                        &mut delta_code,
+                                        &mut uncompressed_data
+                                    );
+                                }
+                            }
+                        }
                     } else {
-                        let encoded = encode_match_raw(length, offset, &pointer_type)?;
-                        delta_code.extend_from_slice(&encoded);
+                        match encode_match_raw(length, offset, &pointer_type) {
+                            Ok(encoded) => delta_code.extend_from_slice(&encoded),
+                            Err(e) => {
+                                match e {
+                                    MatchEncodingError::InvalidLength(..) => {
+                                        log::warn!("Invalid match length \
+                                        (allowed: {MIN_MATCH_LENGTH}-{MAX_MATCH_LENGTH}), \
+                                        falling back to literal encoding");
+                                    }
+                                    MatchEncodingError::InvalidParameterCombination => {
+                                        log::error!(
+                                        "Invalid parameter combination \
+                                        (length: {length}, offset: {offset}, pointer: {pointer_type:?})");
+                                    }
+                                    _ => log::error!("Unhandled match encoding error: {e:?}"),
+                                }
+                                for &byte in &target_data[i..i+length] {
+                                    delta_code.push(byte);
+                                    uncompressed_data += 1;
+                                }
+                            }
+                        }
                     }
 
-                    pointers.update_after_match(i + length, offset, pointer_type)?;
+                    pointers.update_after_match(i + length, offset, pointer_type);
                     i += length;
                     continue;
                 }
@@ -185,7 +216,7 @@ impl ZdeltaEncoder {
                 &huffman_book,
                 &mut delta_code,
                 &mut uncompressed_data
-            )?;
+            );
             i += 1;
         }
 
@@ -195,13 +226,21 @@ impl ZdeltaEncoder {
                 &huffman_book,
                 &mut delta_code,
                 &mut uncompressed_data
-            )?;
+            );
             i += 1;
         }
 
-        let sbc_key = store_delta_chunk(target_map, target_hash, parent_hash, delta_code)?;
+        let sbc_key = match store_delta_chunk(target_map, target_hash, parent_hash, delta_code) {
+            Ok(key) => key,
+            Err(StorageError::LockFailed(e)) => {
+                panic!("Critical storage lock failure: {e}");
+            },
+            Err(StorageError::InsertionFailed(e)) => {
+                panic!("Non-critical insertion failure: {e}");
+            }
+        };
 
-        Ok((uncompressed_data, target_data.len(), sbc_key))
+        (uncompressed_data, target_data.len(), sbc_key)
     }
 
     /// Encodes a single literal byte using configured encoding.
@@ -222,18 +261,17 @@ impl ZdeltaEncoder {
         huffman_book: &Option<Book<u8>>,
         delta_code: &mut Vec<u8>,
         uncompressed_data: &mut usize,
-    ) -> Result<(), MatchEncodingError> {
-        if self.use_huffman_encoding {
+    ) {
+        if let Some(book) = huffman_book.as_ref() {
             let encoded = encode_literal_huffman(
                 byte,
-                huffman_book.as_ref().ok_or(MatchEncodingError::HuffmanBookNotInitialized)?
-            )?;
+                book
+            );
             delta_code.extend_from_slice(&encoded);
         } else {
             delta_code.push(byte);
         }
         *uncompressed_data += 1;
-        Ok(())
     }
 }
 
@@ -305,16 +343,10 @@ fn encode_match_huffman(
     use bit_vec::BitVec;
     let mut buffer = BitVec::new();
 
-    book.encode(&mut buffer, &flag)
-        .map_err(|_| MatchEncodingError::InvalidParameterCombination)?;
-
-    book.encode(&mut buffer, &length_remainder)
-        .map_err(|_| MatchEncodingError::InvalidParameterCombination)?;
-
-    book.encode(&mut buffer, &offset_high)
-        .map_err(|_| MatchEncodingError::InvalidParameterCombination)?;
-    book.encode(&mut buffer, &offset_low)
-        .map_err(|_| MatchEncodingError::InvalidParameterCombination)?;
+    book.encode(&mut buffer, &flag).expect("Flag codes (1-20) must be in codebook");
+    book.encode(&mut buffer, &length_remainder).expect("Length remainders (0-255) must be in codebook");
+    book.encode(&mut buffer, &offset_high).expect("Offset bytes (0-255) must be in codebook");
+    book.encode(&mut buffer, &offset_low).expect("Offset bytes (0-255) must be in codebook");
 
     Ok(buffer.to_bytes())
 }
@@ -369,13 +401,13 @@ fn create_default_huffman_book() -> Book<u8> {
 fn encode_literal_huffman(
     literal: u8,
     book: &Book<u8>,
-) -> Result<Vec<u8>, MatchEncodingError> {
+) -> Vec<u8> {
     use bit_vec::BitVec;
     let mut buffer = BitVec::new();
 
-    book.encode(&mut buffer, &literal).map_err(|_| MatchEncodingError::HuffmanEncodingFailed)?;
+    book.encode(&mut buffer, &literal).expect("All literals (0-255) must be in codebook");
 
-    Ok(buffer.to_bytes())
+    buffer.to_bytes()
 }
 
 /// Encodes a match using raw byte representation (without Huffman coding).

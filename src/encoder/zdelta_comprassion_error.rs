@@ -11,9 +11,6 @@ pub enum ZdeltaCompressionError {
 
     #[error("IO/Storage error: {0}")]
     Storage(#[from] StorageError),
-
-    #[error("Pointer error: {0}")]
-    Pointer(#[from] PointerError),
 }
 
 /// Errors related to data format and conversion.
@@ -58,13 +55,4 @@ pub enum MatchEncodingError {
 
     #[error("Huffman book not initialized")]
     HuffmanBookNotInitialized,
-}
-
-/// Errors related to pointer management.
-///
-/// These errors occur when pointer positions become invalid during compression.
-#[derive(Debug, Error, PartialEq)]
-pub enum PointerError {
-    #[error("Match end position would cause overflow")]
-    PositionOverflow,
 }

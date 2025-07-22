@@ -14,6 +14,7 @@ zstd = "0.13"
 thiserror = "2.0.12"
 huffman-compress = "0.6.1"
 bit-vec = "0.6.3"
+log = "0.4.27"
 
 [dev-dependencies]
 rand = "0.8.5"

@@ -1,6 +1,3 @@
-use crate::encoder::zdelta_comprassion_error::PointerError;
-
-const MAX_MATCH_LENGTH: usize = 1026;
 const SMALL_OFFSET_THRESHOLD : i16 = 256;
 
 /// Types of reference pointers used in delta compression.
@@ -62,11 +59,12 @@ impl MatchPointers {
     ///
     /// # Errors
     /// Returns `PointerError::PositionOverflow` if match_end_position would cause overflow.
-    pub fn update_after_match(&mut self, match_end_position: usize, offset: i16, pointer_type: ReferencePointerType) -> Result<(), PointerError> {
-        if match_end_position > usize::MAX - MAX_MATCH_LENGTH {
-            return Err(PointerError::PositionOverflow);
-        }
-
+    pub fn update_after_match(
+        &mut self,
+        match_end_position: usize,
+        offset: i16,
+        pointer_type: ReferencePointerType
+    ) {
         match pointer_type {
             ReferencePointerType::TargetLocal => self.target_ptr = match_end_position,
             ReferencePointerType::Main => {
@@ -84,7 +82,6 @@ impl MatchPointers {
                 }
             }
         }
-        Ok(())
     }
 }
 
@@ -101,30 +98,21 @@ mod tests {
     #[test]
     fn update_after_match_should_update_target_ptr_for_target_local_matches() {
         let mut pointers = MatchPointers::new(100, 200, 300);
-        let result = pointers.update_after_match(150, -50, ReferencePointerType::TargetLocal);
-        assert!(result.is_ok());
+        pointers.update_after_match(150, -50, ReferencePointerType::TargetLocal);
         assert_eq!(pointers.target_ptr, 150);
-    }
-
-    #[test]
-    fn update_after_match_should_return_error_for_position_overflow() {
-        let mut pointers = MatchPointers::new(100, 200, 300);
-        let result = pointers.update_after_match(usize::MAX, 100, ReferencePointerType::Main);
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), PointerError::PositionOverflow);
     }
 
     #[test]
     fn update_after_match_should_update_main_ptr_for_small_offset() {
         let mut pointers = MatchPointers::new(100, 200, 300);
-        pointers.update_after_match(250, SMALL_OFFSET_THRESHOLD - 1, ReferencePointerType::Main).unwrap();
+        pointers.update_after_match(250, SMALL_OFFSET_THRESHOLD - 1, ReferencePointerType::Main);
         assert_eq!(pointers.main_ref_ptr, 250);
     }
 
     #[test]
     fn update_after_match_should_update_auxiliary_ptr_for_large_offset() {
         let mut pointers = MatchPointers::new(100, 200, 300);
-        pointers.update_after_match(500, SMALL_OFFSET_THRESHOLD, ReferencePointerType::Main).unwrap();
+        pointers.update_after_match(500, SMALL_OFFSET_THRESHOLD, ReferencePointerType::Main);
         assert_eq!(pointers.auxiliary_ref_ptr, 500);
     }
 
