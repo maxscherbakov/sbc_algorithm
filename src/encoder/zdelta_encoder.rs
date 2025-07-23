@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::cmp::min;
+use bit_vec::BitVec;
 use chunkfs::{Data, Database};
-use huffman_compress::{Book, CodeBuilder};
+use huffman_compress::{Book, CodeBuilder, Tree};
 use crate::decoder::Decoder;
 use crate::hasher::SBCHash;
 use crate::{ChunkType, SBCKey, SBCMap};
 use crate::chunkfs_sbc::ClusterPoint;
 use crate::encoder::{count_delta_chunks_with_hash, get_parent_data, Encoder};
 use crate::encoder::zdelta_match_pointers::{MatchPointers, ReferencePointerType};
-use crate::encoder::zdelta_comprassion_error::{DataConversionError, StorageError, MatchEncodingError};
+use crate::encoder::zdelta_comprassion_error::{ZdeltaCompressionError, DataConversionError, StorageError, MatchEncodingError};
 
 /// Threshold for applying penalty to large offsets during match selection.
 const LARGE_OFFSET_PENALTY_THRESHOLD: i32 = 4096;
@@ -39,8 +40,8 @@ type TripletLocations = Vec<PositionInChunk>;
 /// - LZ77-style matching with reference pointers.
 /// - Optional Huffman encoding of the delta.
 pub struct ZdeltaEncoder {
-    /// Whether to use Huffman encoding for the output delta.
-    use_huffman_encoding: bool,
+    huffman_book: Option<Book<u8>>,
+    huffman_tree: Option<Tree<u8>>,
 }
 
 impl Default for ZdeltaEncoder {
@@ -111,9 +112,45 @@ impl ZdeltaEncoder {
     /// # Arguments
     /// * `use_huffman_encoding` - Whether to use Huffman encoding for the delta.
     pub fn new(use_huffman_encoding: bool) -> Self {
-        Self {
-            use_huffman_encoding
+        if use_huffman_encoding {
+            let (huffman_book, huffman_tree) = create_default_huffman_book_and_tree();
+            Self { huffman_book: Some(huffman_book), huffman_tree: Some(huffman_tree) }
         }
+        else {
+            Self { huffman_book: None, huffman_tree: None }
+        }
+    }
+
+    pub fn huffman_book(&self) -> Option<&Book<u8>> {
+        self.huffman_book.as_ref()
+    }
+
+    pub fn huffman_tree(&self) -> Option<&Tree<u8>> {
+        self.huffman_tree.as_ref()
+    }
+
+    pub fn huffman_to_raw(&self, data: &[u8]) -> Vec<u8> {
+        let Some(tree) = &self.huffman_tree else {
+            return data.to_vec();
+        };
+
+        let bit_buffer = BitVec::from_bytes(data);
+        let mut decoder = tree.unbounded_decoder(bit_buffer);
+        let mut output = Vec::new();
+
+        while let (Some(flag), Some(length_remaining), Some(offset_high), Some(offset_low)) = (
+            decoder.next(),
+            decoder.next(),
+            decoder.next(),
+            decoder.next(),
+        ) {
+            output.push(flag);
+            output.push(length_remaining);
+            output.push(offset_high);
+            output.push(offset_low);
+        }
+
+        output
     }
 
     /// Encodes a single data chunk using delta compression against a reference.
@@ -150,12 +187,6 @@ impl ZdeltaEncoder {
         let mut pointers = MatchPointers::new(0, 0, 0);
         let mut previous_match_offset: Option<i16> = None;
 
-        let huffman_book = if self.use_huffman_encoding {
-            Some(create_default_huffman_book())
-        } else {
-            None
-        };
-
         let mut i : PositionInChunk = 0;
         while i + MIN_MATCH_LENGTH <= target_data.len() {
             let mut triplet = [0u8; 3];
@@ -165,7 +196,7 @@ impl ZdeltaEncoder {
             if let Some(parent_positions) = parent_triplet_lookup_table.get(&hash) {
                 if let Some((length, offset, pointer_type)) =
                     select_best_match(target_data, parent_data, i, parent_positions, &pointers) {
-                    if let Some(book) = huffman_book.as_ref() {
+                    if let Some(book) = self.huffman_book() {
                         match encode_match_huffman(length, offset, &pointer_type, book) {
                             Ok(encoded) => {
                                 delta_code.extend_from_slice(&encoded);
@@ -178,7 +209,6 @@ impl ZdeltaEncoder {
                                 for &byte in &target_data[i..i+length] {
                                     self.encode_literal(
                                         byte,
-                                        &huffman_book,
                                         &mut delta_code,
                                         &mut uncompressed_data
                                     );
@@ -219,7 +249,6 @@ impl ZdeltaEncoder {
 
             self.encode_literal(
                 target_data[i],
-                &huffman_book,
                 &mut delta_code,
                 &mut uncompressed_data
             );
@@ -229,7 +258,6 @@ impl ZdeltaEncoder {
         while i < target_data.len() {
             self.encode_literal(
                 target_data[i],
-                &huffman_book,
                 &mut delta_code,
                 &mut uncompressed_data
             );
@@ -264,11 +292,10 @@ impl ZdeltaEncoder {
     fn encode_literal(
         &self,
         byte: u8,
-        huffman_book: &Option<Book<u8>>,
         delta_code: &mut Vec<u8>,
         uncompressed_data: &mut usize,
     ) {
-        if let Some(book) = huffman_book.as_ref() {
+        if let Some(book) = self.huffman_book() {
             let encoded = encode_literal_huffman(
                 byte,
                 book
@@ -357,7 +384,7 @@ fn encode_match_huffman(
     Ok(buffer.to_bytes())
 }
 
-/// Creates default Huffman coding book optimized for zdelta.
+/// Creates default Huffman coding book and tree optimized for zdelta.
 ///
 /// The book contains codes for:
 /// - 20 flag values.
@@ -369,7 +396,7 @@ fn encode_match_huffman(
 /// - Smaller flag values.
 /// - ASCII literals.
 /// - Smaller lengths and offsets.
-fn create_default_huffman_book() -> Book<u8> {
+fn create_default_huffman_book_and_tree() -> (Book<u8>, Tree<u8>) {
     let mut frequencies = HashMap::new();
 
     // Frequencies for flags (1-20)
@@ -392,8 +419,7 @@ fn create_default_huffman_book() -> Book<u8> {
         frequencies.insert(i as u8, if i < 128 { 20 } else { 5 });
     }
 
-    let (book, _) = CodeBuilder::from_iter(frequencies).finish();
-    book
+    CodeBuilder::from_iter(frequencies).finish()
 }
 
 /// Encodes a literal byte using Huffman coding.
@@ -648,6 +674,161 @@ mod tests {
     use super::*;
 
     #[test]
+    fn huffman_to_raw_should_decode_single_match() {
+        let encoder = create_test_encoder();
+
+        let mut buffer = BitVec::new();
+        buffer.extend(BitVec::from_bytes(&[2, 7, 0, 100]));
+
+        let encoded = buffer.to_bytes();
+        let decoded = encoder.huffman_to_raw(&encoded);
+
+        assert_eq!(decoded, vec![2, 7, 0, 100]);
+    }
+
+    #[test]
+    fn huffman_to_raw_should_decode_multiple_matches() {
+        let encoder = create_test_encoder();
+
+        let input = vec![
+            2, 7, 0, 100,
+            10, 41, 4, 0
+        ];
+
+        let mut buffer = BitVec::new();
+        buffer.extend(BitVec::from_bytes(&input));
+
+        let encoded = buffer.to_bytes();
+        let decoded = encoder.huffman_to_raw(&encoded);
+
+        assert_eq!(decoded, input);
+    }
+
+    #[test]
+    fn huffman_to_raw_should_handle_empty_input() {
+        let encoder = create_test_encoder();
+        let decoded = encoder.huffman_to_raw(&[]);
+        assert_eq!(decoded, vec![]);
+    }
+
+    #[test]
+    fn huffman_to_raw_should_return_raw_data_when_huffman_disabled() {
+        let encoder = ZdeltaEncoder::new(false);
+        let data = vec![1, 2, 3, 4];
+        let decoded = encoder.huffman_to_raw(&data);
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn huffman_to_raw_should_handle_incomplete_last_match() {
+        let encoder = create_test_encoder();
+
+        let input = vec![2, 7, 0, 100, 10, 41, 4];
+
+        let mut buffer = BitVec::new();
+        buffer.extend(BitVec::from_bytes(&input));
+
+        let encoded = buffer.to_bytes();
+        let decoded = encoder.huffman_to_raw(&encoded);
+
+        assert_eq!(decoded, vec![2, 7, 0, 100]);
+    }
+
+    #[test]
+    fn huffman_to_raw_should_decode_max_values() {
+        let encoder = create_test_encoder();
+
+        let input = vec![
+            16, 255, 127, 255,
+            20, 255, 127, 254
+        ];
+
+        let mut buffer = BitVec::new();
+        buffer.extend(BitVec::from_bytes(&input));
+
+        let encoded = buffer.to_bytes();
+        let decoded = encoder.huffman_to_raw(&encoded);
+
+        assert_eq!(decoded, input);
+    }
+
+    #[test]
+    fn huffman_to_raw_should_preserve_byte_order() {
+        let encoder = create_test_encoder();
+
+        let input = vec![2, 10, 0x12, 0x34];
+
+        let mut buffer = BitVec::new();
+        buffer.extend(BitVec::from_bytes(&input));
+
+        let encoded = buffer.to_bytes();
+        let decoded = encoder.huffman_to_raw(&encoded);
+
+        assert_eq!(decoded[2], 0x12);
+        assert_eq!(decoded[3], 0x34);
+    }
+
+    #[test]
+    fn huffman_to_raw_should_handle_all_pointer_types() {
+        let encoder = create_test_encoder();
+
+        let input = vec![
+            1, 10, 0, 100,    // TargetLocal
+            2, 20, 1, 200,    // Main, positive
+            3, 30, 2, 100,    // Main, negative
+            4, 40, 3, 200,    // Auxiliary, positive
+            5, 50, 4, 100     // Auxiliary, negative
+        ];
+
+        let mut buffer = BitVec::new();
+        buffer.extend(BitVec::from_bytes(&input));
+
+        let encoded = buffer.to_bytes();
+        let decoded = encoder.huffman_to_raw(&encoded);
+
+        assert_eq!(decoded, input);
+    }
+
+    #[test]
+    fn huffman_to_raw_should_decode_huffman_encoded_data() {
+        let encoder = ZdeltaEncoder::new(true);
+
+        let test_cases = vec![
+            vec![2, 7, 0, 100],     // length=10, offset=100
+            vec![10, 41, 4, 0],     // length=300, offset=-1024
+            vec![16, 255, 127, 255] // length=1026, offset=32767
+        ];
+
+        let mut full_bitvec = BitVec::new();
+        for case in &test_cases {
+            let mut buffer = BitVec::new();
+            encoder.huffman_book.as_ref().unwrap().encode(&mut buffer, &case[0]).unwrap();
+            encoder.huffman_book.as_ref().unwrap().encode(&mut buffer, &case[1]).unwrap();
+            encoder.huffman_book.as_ref().unwrap().encode(&mut buffer, &case[2]).unwrap();
+            encoder.huffman_book.as_ref().unwrap().encode(&mut buffer, &case[3]).unwrap();
+            full_bitvec.extend(buffer);
+        }
+
+        let encoded_data = full_bitvec.to_bytes();
+
+        let decoded = encoder.huffman_to_raw(&encoded_data);
+
+        let expected_raw: Vec<u8> = test_cases.iter().flatten().cloned().collect();
+        assert_eq!(decoded, expected_raw);
+    }
+
+    #[test]
+    fn huffman_to_raw_should_handle_invalid_huffman_data_gracefully() {
+        let encoder = ZdeltaEncoder::new(true);
+
+        let invalid_data = vec![0xFF, 0xFF, 0xFF];
+        let result = encoder.huffman_to_raw(&invalid_data);
+
+        assert_ne!(result, invalid_data);
+        assert!(result.is_empty());
+    }
+
+    #[test]
     fn encode_match_huffman_should_encode_valid_match_correctly() {
         let book = create_test_huffman_book();
 
@@ -730,8 +911,8 @@ mod tests {
     }
 
     #[test]
-    fn create_default_huffman_book_should_return_valid_book_for_all_supported_symbols() {
-        let book = create_default_huffman_book();
+    fn create_default_huffman_book_and_tree_should_return_valid_book_for_all_supported_symbols() {
+        let (book, _) = create_default_huffman_book_and_tree();
 
         assert!(!encode_to_bits(&book, 1).is_empty());    // Flag
         assert!(!encode_to_bits(&book, 65).is_empty());   // Literal
@@ -741,8 +922,8 @@ mod tests {
     }
 
     #[test]
-    fn create_default_huffman_book_should_assign_shorter_codes_to_more_frequent_symbols() {
-        let book = create_default_huffman_book();
+    fn create_default_huffman_book_and_tree_should_assign_shorter_codes_to_more_frequent_symbols() {
+        let (book, _) = create_default_huffman_book_and_tree();
 
         let flag_code_len = encode_to_bits(&book, 1).len();
         let common_literal_len = encode_to_bits(&book, 65).len();
@@ -753,8 +934,8 @@ mod tests {
     }
 
     #[test]
-    fn create_default_huffman_book_should_assign_shorter_codes_to_ascii_vs_non_ascii_literals() {
-        let book = create_default_huffman_book();
+    fn create_default_huffman_book_and_tree_should_assign_shorter_codes_to_ascii_vs_non_ascii_literals() {
+        let (book, _) = create_default_huffman_book_and_tree();
 
         let ascii_len = encode_to_bits(&book, 65).len();
         let non_ascii_len = encode_to_bits(&book, 200).len();
@@ -763,8 +944,8 @@ mod tests {
     }
 
     #[test]
-    fn create_default_huffman_book_should_support_all_possible_byte_values() {
-        let book = create_default_huffman_book();
+    fn create_default_huffman_book_and_tree_should_support_all_possible_byte_values() {
+        let (book, _) = create_default_huffman_book_and_tree();
 
         for i in 0..=255u8 {
             assert!(!encode_to_bits(&book, i).is_empty(), "Failed to encode byte {i}");
@@ -772,8 +953,8 @@ mod tests {
     }
 
     #[test]
-    fn create_default_huffman_book_should_produce_different_codes_for_different_inputs() {
-        let book = create_default_huffman_book();
+    fn create_default_huffman_book_and_tree_should_produce_different_codes_for_different_inputs() {
+        let (book, _) = create_default_huffman_book_and_tree();
 
         let code1 = encode_to_bits(&book, 1);
         let code2 = encode_to_bits(&book, 2);
@@ -1054,5 +1235,18 @@ mod tests {
             frequencies.insert(i, 1);
         }
         CodeBuilder::from_iter(frequencies).finish().0
+    }
+
+    fn create_test_encoder() -> ZdeltaEncoder {
+        let mut frequencies = HashMap::new();
+        for i in 0..=255 {
+            frequencies.insert(i, 1);
+        }
+        let (book, tree) = CodeBuilder::from_iter(frequencies).finish();
+
+        ZdeltaEncoder {
+            huffman_book: Some(book),
+            huffman_tree: Some(tree),
+        }
     }
 }
