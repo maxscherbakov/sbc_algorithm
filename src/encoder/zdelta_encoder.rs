@@ -107,7 +107,7 @@ impl ZdeltaEncoder {
     /// * `use_huffman_encoding` - Whether to use Huffman encoding for the delta.
     pub fn new(use_huffman_encoding: bool) -> Self {
         if use_huffman_encoding {
-            let (huffman_book, huffman_tree) = create_default_huffman_book_and_tree();
+            let (huffman_book, _) = create_default_huffman_book_and_tree();
             Self { huffman_book: Some(huffman_book) }
         }
         else {
@@ -208,7 +208,6 @@ impl ZdeltaEncoder {
                                         "Invalid parameter combination \
                                         (length: {match_length}, offset: {offset}, pointer: {pointer_type:?})");
                                     }
-                                    _ => log::error!("Unhandled match encoding error: {e:?}"),
                                 }
                                 for &byte in &target_data[i..i+ match_length] {
                                     delta_code.push(byte);
