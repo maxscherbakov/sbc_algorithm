@@ -29,6 +29,14 @@ impl MatchPointers {
         MatchPointers { target_ptr, main_ref_ptr, auxiliary_ref_ptr }
     }
 
+    pub fn get(&self, pointer: &ReferencePointerType) -> usize {
+        match pointer {
+            ReferencePointerType::Main => self.main_ref_ptr,
+            ReferencePointerType::Auxiliary => self.auxiliary_ref_ptr,
+            ReferencePointerType::TargetLocal => self.target_ptr,
+        }
+    }
+
     /// Calculates the offset from the nearest pointer to the given position.
     ///
     /// Returns:
@@ -93,8 +101,8 @@ impl MatchPointers {
                 self.target_ptr = match_end_position;
             },
             _ => {
-                if let Some(prev_offset) = previous_match_offset {
-                    if prev_offset.abs() < SMALL_OFFSET_THRESHOLD && offset.abs() < SMALL_OFFSET_THRESHOLD {
+                if let Some(previous_offset) = previous_match_offset {
+                    if previous_offset.abs() < SMALL_OFFSET_THRESHOLD && offset.abs() < SMALL_OFFSET_THRESHOLD {
                         match pointer_type {
                             ReferencePointerType::Main => self.main_ref_ptr = match_end_position,
                             ReferencePointerType::Auxiliary => self.auxiliary_ref_ptr = match_end_position,
