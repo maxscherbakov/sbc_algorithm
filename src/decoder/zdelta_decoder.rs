@@ -817,34 +817,6 @@ mod tests {
         assert!(decoded.is_empty());
     }
 
-    #[test]
-    fn test_huffman_decoding() {
-        let decoder = ZdeltaDecoder::new(true);
-
-        // Тестовые данные должны быть получены от реального кодировщика
-        let encoder = ZdeltaEncoder::new(true);
-        let mut buffer = BitVec::new();
-
-        // Кодируем те же данные, что и в encode_delta_chunk
-        encoder.huffman_book().unwrap()
-            .encode(&mut buffer, &2).unwrap();  // Match flag
-        encoder.huffman_book().unwrap()
-            .encode(&mut buffer, &1).unwrap();  // Length remainder
-        encoder.huffman_book().unwrap()
-            .encode(&mut buffer, &0).unwrap();  // Offset high
-        encoder.huffman_book().unwrap()
-            .encode(&mut buffer, &0).unwrap();  // Offset low
-        encoder.huffman_book().unwrap()
-            .encode(&mut buffer, &0x00).unwrap(); // Literal flag
-        encoder.huffman_book().unwrap()
-            .encode(&mut buffer, &6).unwrap();    // Literal value
-
-        let encoded = buffer.to_bytes();
-        let decoded = decoder.huffman_to_raw(&encoded);
-
-        assert_eq!(decoded, vec![2, 1, 0, 0, 0x00, 6]);
-    }
-
     fn create_test_decoder() -> ZdeltaDecoder {
         let mut frequencies = HashMap::new();
         for i in 0..=255 {

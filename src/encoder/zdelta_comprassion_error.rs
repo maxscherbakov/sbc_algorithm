@@ -49,10 +49,4 @@ pub enum MatchEncodingError {
 
     #[error("Invalid parameter combination")]
     InvalidParameterCombination,
-
-    #[error("Huffman encoding failed")]
-    HuffmanEncodingFailed,
-
-    #[error("Huffman book not initialized")]
-    HuffmanBookNotInitialized,
 }
