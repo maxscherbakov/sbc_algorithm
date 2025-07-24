@@ -1,4 +1,3 @@
-use std::cmp::min;
 use bit_vec::BitVec;
 use huffman_compress::Tree;
 use crate::decoder::Decoder;
@@ -59,17 +58,38 @@ impl ZdeltaDecoder {
         let bit_buffer = BitVec::from_bytes(data);
         let mut decoder = tree.unbounded_decoder(bit_buffer);
         let mut output = Vec::new();
+        let mut bits_processed = 0;
 
-        while let (Some(flag), Some(length_remaining), Some(offset_high), Some(offset_low)) = (
-            decoder.next(),
-            decoder.next(),
-            decoder.next(),
-            decoder.next(),
-        ) {
-            output.push(flag);
-            output.push(length_remaining);
-            output.push(offset_high);
-            output.push(offset_low);
+        while let Some(flag) = decoder.next() {
+            bits_processed += 1;
+
+            if flag == LITERAL_FLAG {
+                if let Some(literal) = decoder.next() {
+                    bits_processed += 1;
+                    output.push(LITERAL_FLAG);
+                    output.push(literal);
+                } else {
+                    log::warn!("Incomplete literal at bit {bits_processed}");
+                    continue;
+                }
+            } else if (1..=20).contains(&flag) {
+                if let (Some(length_remainder), Some(offset_high), Some(offset_low)) = (
+                    decoder.next(),
+                    decoder.next(),
+                    decoder.next(),
+                ) {
+                    output.push(flag);
+                    output.push(length_remainder);
+                    output.push(offset_high);
+                    output.push(offset_low);
+                } else {
+                    log::warn!("Incomplete match at bit {bits_processed}");
+                    continue;
+                }
+            } else {
+                log::warn!("Unexpected flag {flag} at bit {bits_processed}");
+                continue;
+            }
         }
 
         output
@@ -289,6 +309,7 @@ mod tests {
     use std::collections::HashMap;
     use huffman_compress::CodeBuilder;
     use bit_vec::BitVec;
+    use crate::encoder::zdelta_encoder::ZdeltaEncoder;
     use super::*;
     use crate::encoder::zdelta_match_pointers::ReferencePointerType;
     use crate::encoder::zdelta_match_pointers::ReferencePointerType::{Auxiliary, TargetLocal};
@@ -728,6 +749,100 @@ mod tests {
 
         assert_ne!(result, invalid_data);
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn huffman_to_raw_should_decode_single_literal_correctly() {
+        let decoder = ZdeltaDecoder::new(true);
+        let encoder = ZdeltaEncoder::new(true);
+        let mut buffer = BitVec::new();
+
+        encoder.huffman_book().as_ref().unwrap().encode(&mut buffer, &LITERAL_FLAG).expect("Literal flag must be in codebook");
+        encoder.huffman_book().as_ref().unwrap().encode(&mut buffer, &b'A').expect("All literals (0-255) must be in codebook");
+
+        let encoded = buffer.to_bytes();
+
+        let decoded = decoder.huffman_to_raw(&encoded);
+        assert_eq!(decoded, vec![LITERAL_FLAG, b'A']);
+    }
+
+    #[test]
+    fn huffman_to_raw_should_handle_mixed_literals_and_matches() {
+        let decoder = ZdeltaDecoder::new(true);
+        let encoder = ZdeltaEncoder::new(true);
+        let mut buffer = BitVec::new();
+
+        // Literal 'A'
+        encoder.huffman_book().as_ref().unwrap()
+            .encode(&mut buffer, &LITERAL_FLAG).expect("Literal flag must be in codebook");
+        encoder.huffman_book().as_ref().unwrap()
+            .encode(&mut buffer, &b'A').expect("Literal must be in codebook");
+
+        // Match
+        encoder.huffman_book().as_ref().unwrap()
+            .encode(&mut buffer, &2).expect("Flag must be in codebook");
+        encoder.huffman_book().as_ref().unwrap()
+            .encode(&mut buffer, &10).expect("Length remainder must be in codebook");
+        encoder.huffman_book().as_ref().unwrap()
+            .encode(&mut buffer, &0).expect("Offset high must be in codebook");
+        encoder.huffman_book().as_ref().unwrap()
+            .encode(&mut buffer, &100).expect("Offset low must be in codebook");
+
+        // Literal 'B'
+        encoder.huffman_book().as_ref().unwrap()
+            .encode(&mut buffer, &LITERAL_FLAG).expect("Literal flag must be in codebook");
+        encoder.huffman_book().as_ref().unwrap()
+            .encode(&mut buffer, &b'B').expect("Literal must be in codebook");
+
+        let encoded = buffer.to_bytes();
+        let decoded = decoder.huffman_to_raw(&encoded);
+
+        assert_eq!(decoded, vec![LITERAL_FLAG, b'A', 2, 10, 0, 100, LITERAL_FLAG, b'B']);
+    }
+
+    #[test]
+    fn huffman_to_raw_should_ignore_unknown_markers() {
+        let decoder = ZdeltaDecoder::new(true);
+        let encoder = ZdeltaEncoder::new(true);
+        let mut buffer = BitVec::new();
+
+        encoder.huffman_book().as_ref().unwrap()
+            .encode(&mut buffer, &21).expect("Should encode invalid flag");
+        encoder.huffman_book().as_ref().unwrap()
+            .encode(&mut buffer, &65).expect("Should encode byte");
+
+        let encoded = buffer.to_bytes();
+        let decoded = decoder.huffman_to_raw(&encoded);
+
+        assert!(decoded.is_empty());
+    }
+
+    #[test]
+    fn test_huffman_decoding() {
+        let decoder = ZdeltaDecoder::new(true);
+
+        // Тестовые данные должны быть получены от реального кодировщика
+        let encoder = ZdeltaEncoder::new(true);
+        let mut buffer = BitVec::new();
+
+        // Кодируем те же данные, что и в encode_delta_chunk
+        encoder.huffman_book().unwrap()
+            .encode(&mut buffer, &2).unwrap();  // Match flag
+        encoder.huffman_book().unwrap()
+            .encode(&mut buffer, &1).unwrap();  // Length remainder
+        encoder.huffman_book().unwrap()
+            .encode(&mut buffer, &0).unwrap();  // Offset high
+        encoder.huffman_book().unwrap()
+            .encode(&mut buffer, &0).unwrap();  // Offset low
+        encoder.huffman_book().unwrap()
+            .encode(&mut buffer, &0x00).unwrap(); // Literal flag
+        encoder.huffman_book().unwrap()
+            .encode(&mut buffer, &6).unwrap();    // Literal value
+
+        let encoded = buffer.to_bytes();
+        let decoded = decoder.huffman_to_raw(&encoded);
+
+        assert_eq!(decoded, vec![2, 1, 0, 0, 0x00, 6]);
     }
 
     fn create_test_decoder() -> ZdeltaDecoder {

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::cmp::min;
+use bit_vec::BitVec;
 use chunkfs::{Data, Database};
 use huffman_compress::{Book, CodeBuilder, Tree};
 use crate::decoder::Decoder;
@@ -11,16 +12,13 @@ use crate::encoder::{count_delta_chunks_with_hash, get_parent_data, Encoder};
 use crate::encoder::zdelta_match_pointers::{MatchPointers, ReferencePointerType};
 use crate::encoder::zdelta_comprassion_error::{DataConversionError, StorageError, MatchEncodingError};
 
-/// Threshold for applying penalty to large offsets during match selection.
 const LARGE_OFFSET_PENALTY_THRESHOLD: i32 = 4096;
-/// Minimum allowed match length (3 bytes).
 const MIN_MATCH_LENGTH: usize = 3;
-/// Maximum allowed match length (1026 bytes).
 const MAX_MATCH_LENGTH: usize = 1026;
-/// Block size used for length coefficient calculation.
 const LENGTH_BLOCK_SIZE: usize = 256;
 const HASH_TABLE_SIZE: usize = 65536;
 const MAX_HASH_CHAIN_LENGTH: usize = 1024;
+const LITERAL_FLAG: u8 = 0x00;
 
 /// A 3-byte sequence used for finding matches.
 type Triplet = [u8; 3];
@@ -38,7 +36,6 @@ type TripletLocations = Vec<PositionInChunk>;
 /// - Optional Huffman encoding of the delta.
 pub struct ZdeltaEncoder {
     huffman_book: Option<Book<u8>>,
-    huffman_tree: Option<Tree<u8>>,
 }
 
 impl Default for ZdeltaEncoder {
@@ -111,19 +108,15 @@ impl ZdeltaEncoder {
     pub fn new(use_huffman_encoding: bool) -> Self {
         if use_huffman_encoding {
             let (huffman_book, huffman_tree) = create_default_huffman_book_and_tree();
-            Self { huffman_book: Some(huffman_book), huffman_tree: Some(huffman_tree) }
+            Self { huffman_book: Some(huffman_book) }
         }
         else {
-            Self { huffman_book: None, huffman_tree: None }
+            Self { huffman_book: None }
         }
     }
 
     pub fn huffman_book(&self) -> Option<&Book<u8>> {
         self.huffman_book.as_ref()
-    }
-
-    pub fn huffman_tree(&self) -> Option<&Tree<u8>> {
-        self.huffman_tree.as_ref()
     }
 
     /// Encodes a single data chunk using delta compression against a reference.
@@ -159,6 +152,7 @@ impl ZdeltaEncoder {
         let mut uncompressed_data = 0;
         let mut pointers = MatchPointers::new(0, 0, 0);
         let mut previous_match_offset: Option<i16> = None;
+        let mut bit_vec_delta_code = BitVec::new();
 
         let mut i : PositionInChunk = 0;
         while i + MIN_MATCH_LENGTH <= target_data.len() {
@@ -175,14 +169,14 @@ impl ZdeltaEncoder {
                     &pointers
                 ) {
                     if match_length < MIN_MATCH_LENGTH {
-                        self.encode_literal(target_data[i], &mut delta_code, &mut uncompressed_data);
+                        self.encode_literal(target_data[i], &mut delta_code, &mut bit_vec_delta_code, &mut uncompressed_data);
                         i += 1;
                         continue;
                     }
                     if let Some(book) = self.huffman_book() {
                         match encode_match_huffman(match_length, offset, &pointer_type, book, target_data.len() - i) {
                             Ok(encoded) => {
-                                delta_code.extend_from_slice(&encoded);
+                                bit_vec_delta_code.extend(&encoded);
                             }
                             Err(_) => {
                                 log::warn!("Invalid match length \
@@ -193,6 +187,7 @@ impl ZdeltaEncoder {
                                     self.encode_literal(
                                         byte,
                                         &mut delta_code,
+                                        &mut bit_vec_delta_code,
                                         &mut uncompressed_data
                                     );
                                 }
@@ -237,13 +232,16 @@ impl ZdeltaEncoder {
                 }
             }
 
-            self.encode_literal(target_data[i], &mut delta_code, &mut uncompressed_data);
+            self.encode_literal(target_data[i], &mut delta_code, &mut bit_vec_delta_code, &mut uncompressed_data);
             i += 1;
         }
 
         while i < target_data.len() {
-            self.encode_literal(target_data[i], &mut delta_code, &mut uncompressed_data);
+            self.encode_literal(target_data[i], &mut delta_code, &mut bit_vec_delta_code, &mut uncompressed_data);
             i += 1;
+        }
+        if self.huffman_book().is_some() {
+            delta_code.extend_from_slice(&bit_vec_delta_code.to_bytes());
         }
 
         let sbc_key = match store_delta_chunk(target_map, target_hash, parent_hash, delta_code) {
@@ -265,6 +263,7 @@ impl ZdeltaEncoder {
     /// * `byte` - The byte to encode.
     /// * `huffman_book` - Huffman code book (when Huffman encoding is enabled).
     /// * `delta_code` - Output buffer for encoded data.
+    /// * `bit_vec_delta_code` - Used as delta_code when huffman is enabled.
     /// * `uncompressed_data` - Counter for tracking uncompressed bytes.
     ///
     /// # Errors
@@ -275,11 +274,12 @@ impl ZdeltaEncoder {
         &self,
         byte: u8,
         delta_code: &mut Vec<u8>,
+        bit_vec_delta_code: &mut BitVec,
         uncompressed_data: &mut usize,
     ) {
         if let Some(book) = self.huffman_book() {
             let encoded = encode_literal_huffman(byte, book);
-            delta_code.extend_from_slice(&encoded);
+            bit_vec_delta_code.extend(&encoded);
         } else {
             delta_code.push(0x00);
             delta_code.push(byte);
@@ -338,7 +338,7 @@ fn encode_match_huffman(
     pointer_type: &ReferencePointerType,
     book: &Book<u8>,
     data_length: usize,
-) -> Result<Vec<u8>, MatchEncodingError> {
+) -> Result<BitVec, MatchEncodingError> {
     let effective_length = min(match_length, data_length);
 
     if !(MIN_MATCH_LENGTH..=MAX_MATCH_LENGTH).contains(&effective_length) {
@@ -365,7 +365,7 @@ fn encode_match_huffman(
     book.encode(&mut buffer, &offset_high).expect("Offset bytes (0-255) must be in codebook");
     book.encode(&mut buffer, &offset_low).expect("Offset bytes (0-255) must be in codebook");
 
-    Ok(buffer.to_bytes())
+    Ok(buffer)
 }
 
 /// Creates default Huffman coding book and tree optimized for zdelta.
@@ -382,6 +382,8 @@ fn encode_match_huffman(
 /// - Smaller lengths and offsets.
 pub fn create_default_huffman_book_and_tree() -> (Book<u8>, Tree<u8>) {
     let mut frequencies = HashMap::new();
+
+    frequencies.insert(LITERAL_FLAG, 100);
 
     // Frequencies for flags (1-20)
     for i in 1..=20 {
@@ -413,17 +415,18 @@ pub fn create_default_huffman_book_and_tree() -> (Book<u8>, Tree<u8>) {
 /// * `book` - Huffman code book for encoding.
 ///
 /// # Returns
-/// Encoded bytes or error if encoding fails.
+/// Encoded BitVec or error if encoding fails.
 fn encode_literal_huffman(
     literal: u8,
     book: &Book<u8>,
-) -> Vec<u8> {
+) -> BitVec {
     use bit_vec::BitVec;
     let mut buffer = BitVec::new();
 
+    book.encode(&mut buffer, &LITERAL_FLAG).expect("Literal flag must be in codebook");
     book.encode(&mut buffer, &literal).expect("All literals (0-255) must be in codebook");
 
-    buffer.to_bytes()
+    buffer
 }
 
 /// Encodes a match using raw byte representation (without Huffman coding).
@@ -790,7 +793,7 @@ mod tests {
         SBCMap<ZdeltaDecoder, AronovichHash>,
         SBCKey<AronovichHash>,
     ) {
-        let mut binding = SBCMap::new(ZdeltaDecoder::new(false));
+        let mut binding = SBCMap::new(ZdeltaDecoder::new(true));
         let sbc_map = Arc::new(Mutex::new(&mut binding));
 
         let (_, sbc_key) = encode_simple_chunk(
@@ -799,7 +802,7 @@ mod tests {
             AronovichHash::new_with_u32(0),
         );
 
-        let encoder = ZdeltaEncoder::new(false);
+        let encoder = ZdeltaEncoder::new(true);
         let (_, _, sbc_key_2) = encoder.encode_delta_chunk(
             sbc_map.clone(),
             target_data,
