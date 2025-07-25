@@ -121,45 +121,36 @@ impl Decoder for ZdeltaDecoder {
         let mut pointers = MatchPointers::new(0, 0, 0);
         let mut previous_offset: Option<i16> = None;
 
-        let data_to_decode = if self.huffman_tree.is_some() {
-            let decoded = self.huffman_to_raw(delta_code);
-            if decoded.is_empty() {
-                return output;
-            }
+        let data_to_decode = self.huffman_to_raw(delta_code);
 
-            decoded
-        } else {
-            delta_code.to_vec()
-        };
-
-        let mut i = 0;
-        while i < data_to_decode.len() {
-            if data_to_decode[i] == LITERAL_FLAG {
-                if i + 1 >= data_to_decode.len() {
+        let mut index_in_data_to_decode = 0;
+        while index_in_data_to_decode < data_to_decode.len() {
+            if data_to_decode[index_in_data_to_decode] == LITERAL_FLAG {
+                if index_in_data_to_decode + 1 >= data_to_decode.len() {
                     break;
                 }
-                output.push(data_to_decode[i + 1]);
-                i += 2;
+                output.push(data_to_decode[index_in_data_to_decode + 1]);
+                index_in_data_to_decode += 2;
                 continue;
             }
 
-            if i + MATCH_INSTRUCTION_SIZE > data_to_decode.len() {
-                log::warn!("Incomplete match data at index {i}");
-                i += 1;
+            if index_in_data_to_decode + MATCH_INSTRUCTION_SIZE > data_to_decode.len() {
+                log::warn!("Incomplete match data at index {index_in_data_to_decode}");
+                index_in_data_to_decode += 1;
                 continue;
             }
 
-            let flag = data_to_decode[i];
-            let length_remainder = data_to_decode[i + 1];
-            let offset_high = data_to_decode[i + 2];
-            let offset_low = data_to_decode[i + 3];
-            i += MATCH_INSTRUCTION_SIZE;
+            let flag = data_to_decode[index_in_data_to_decode];
+            let length_remainder = data_to_decode[index_in_data_to_decode + 1];
+            let offset_high = data_to_decode[index_in_data_to_decode + 2];
+            let offset_low = data_to_decode[index_in_data_to_decode + 3];
+            index_in_data_to_decode += MATCH_INSTRUCTION_SIZE;
 
             let (length_coefficient, pointer_type, is_positive) = match decode_flag(flag) {
                 Ok(res) => res,
                 Err(e) => {
-                    log::error!("Invalid flag {flag} at index {i}, skipping: {e:?}");
-                    i += 1;
+                    log::error!("Invalid flag {flag} at index {index_in_data_to_decode}, skipping: {e:?}");
+                    index_in_data_to_decode += 1;
                     continue;
                 }
             };
@@ -169,8 +160,8 @@ impl Decoder for ZdeltaDecoder {
                 (length_coefficient as usize * LENGTH_BLOCK_SIZE);
 
             if match_length > MAX_MATCH_LENGTH {
-                log::error!("Match length {match_length} exceeds MAX_MATCH_LENGTH at index {i}");
-                i += 1;
+                log::error!("Match length {match_length} exceeds MAX_MATCH_LENGTH at index {index_in_data_to_decode}");
+                index_in_data_to_decode += 1;
                 continue;
             }
 
@@ -186,8 +177,8 @@ impl Decoder for ZdeltaDecoder {
                 &mut output,
                 &mut previous_offset,
             ) {
-                log::error!("Failed to process match at index {i}: {e:?}");
-                i += 1;
+                log::error!("Failed to process match at index {index_in_data_to_decode}: {e:?}");
+                index_in_data_to_decode += 1;
                 continue;
             }
         }

@@ -22,12 +22,6 @@ const LITERAL_FLAG: u8 = 0x00;
 
 /// A 3-byte sequence used for finding matches.
 type Triplet = [u8; 3];
-/// Hash value for a triplet.
-type TripletHash = u32;
-/// Position within a data chunk.
-type PositionInChunk = usize;
-/// Collection of positions where a triplet occurs.
-type TripletLocations = Vec<PositionInChunk>;
 
 /// Zdelta compression encoder.
 ///
@@ -145,7 +139,7 @@ impl ZdeltaEncoder {
         target_data: &[u8],
         target_hash: Hash,
         parent_data: &[u8],
-        parent_triplet_lookup_table: &HashMap<TripletHash, TripletLocations>,
+        parent_triplet_lookup_table: &HashMap<u32, Vec<usize>>,
         parent_hash: Hash,
     ) -> (usize, usize, SBCKey<Hash>) {
         let mut delta_code : Vec<u8> = Vec::new();
@@ -154,27 +148,27 @@ impl ZdeltaEncoder {
         let mut previous_match_offset: Option<i16> = None;
         let mut bit_vec_delta_code = BitVec::new();
 
-        let mut i : PositionInChunk = 0;
-        while i + MIN_MATCH_LENGTH <= target_data.len() {
+        let mut position_in_target_data : usize = 0;
+        while position_in_target_data + MIN_MATCH_LENGTH <= target_data.len() {
             let mut triplet = [0u8; 3];
-            triplet.copy_from_slice(&target_data[i..i+3]);
+            triplet.copy_from_slice(&target_data[position_in_target_data..position_in_target_data+3]);
             let hash = compute_triplet_hash(&triplet);
 
             if let Some(parent_positions) = parent_triplet_lookup_table.get(&hash) {
                 if let Some((match_length, offset, pointer_type)) = select_best_match(
                     target_data,
                     parent_data,
-                    i,
+                    position_in_target_data,
                     parent_positions,
                     &pointers
                 ) {
                     if match_length < MIN_MATCH_LENGTH {
-                        self.encode_literal(target_data[i], &mut delta_code, &mut bit_vec_delta_code, &mut uncompressed_data);
-                        i += 1;
+                        self.encode_literal(target_data[position_in_target_data], &mut delta_code, &mut bit_vec_delta_code, &mut uncompressed_data);
+                        position_in_target_data += 1;
                         continue;
                     }
                     if let Some(book) = self.huffman_book() {
-                        match encode_match_huffman(match_length, offset, &pointer_type, book, target_data.len() - i) {
+                        match encode_match_huffman(match_length, offset, &pointer_type, book, target_data.len() - position_in_target_data) {
                             Ok(encoded) => {
                                 bit_vec_delta_code.extend(&encoded);
                             }
@@ -183,7 +177,7 @@ impl ZdeltaEncoder {
                                 (allowed: {MIN_MATCH_LENGTH}-{MAX_MATCH_LENGTH}), \
                                 falling back to literal encoding");
 
-                                for &byte in &target_data[i..i+ match_length] {
+                                for &byte in &target_data[position_in_target_data..position_in_target_data+ match_length] {
                                     self.encode_literal(
                                         byte,
                                         &mut delta_code,
@@ -194,7 +188,7 @@ impl ZdeltaEncoder {
                             }
                         }
                     } else {
-                        match encode_match_raw(match_length, offset, &pointer_type, target_data.len() - i) {
+                        match encode_match_raw(match_length, offset, &pointer_type, target_data.len() - position_in_target_data) {
                             Ok(encoded) => delta_code.extend_from_slice(&encoded),
                             Err(e) => {
                                 match e {
@@ -209,7 +203,7 @@ impl ZdeltaEncoder {
                                         (length: {match_length}, offset: {offset}, pointer: {pointer_type:?})");
                                     }
                                 }
-                                for &byte in &target_data[i..i+ match_length] {
+                                for &byte in &target_data[position_in_target_data..position_in_target_data+ match_length] {
                                     delta_code.push(byte);
                                     uncompressed_data += 1;
                                 }
@@ -218,7 +212,7 @@ impl ZdeltaEncoder {
                     }
 
                     let reference_match_end = match pointer_type {
-                        ReferencePointerType::TargetLocal => i + match_length,
+                        ReferencePointerType::TargetLocal => position_in_target_data + match_length,
                         _ => {
                             let base_ptr = pointers.get(&pointer_type);
                             (base_ptr as isize + offset as isize + match_length as isize) as usize
@@ -226,18 +220,18 @@ impl ZdeltaEncoder {
                     };
                     pointers.smart_update_after_match(reference_match_end, offset, pointer_type, previous_match_offset);
                     previous_match_offset = Some(offset);
-                    i += match_length;
+                    position_in_target_data += match_length;
                     continue;
                 }
             }
 
-            self.encode_literal(target_data[i], &mut delta_code, &mut bit_vec_delta_code, &mut uncompressed_data);
-            i += 1;
+            self.encode_literal(target_data[position_in_target_data], &mut delta_code, &mut bit_vec_delta_code, &mut uncompressed_data);
+            position_in_target_data += 1;
         }
 
-        while i < target_data.len() {
-            self.encode_literal(target_data[i], &mut delta_code, &mut bit_vec_delta_code, &mut uncompressed_data);
-            i += 1;
+        while position_in_target_data < target_data.len() {
+            self.encode_literal(target_data[position_in_target_data], &mut delta_code, &mut bit_vec_delta_code, &mut uncompressed_data);
+            position_in_target_data += 1;
         }
         if self.huffman_book().is_some() {
             delta_code.extend_from_slice(&bit_vec_delta_code.to_bytes());
@@ -608,8 +602,8 @@ fn select_best_match(
 fn find_max_match_length(
     target_data: &[u8],
     parent_data: &[u8],
-    start_position_in_target: PositionInChunk,
-    start_position_in_parent: PositionInChunk,
+    start_position_in_target: usize,
+    start_position_in_parent: usize,
 ) -> Option<usize> {
     if start_position_in_target + MIN_MATCH_LENGTH > target_data.len() ||
         start_position_in_parent + MIN_MATCH_LENGTH > parent_data.len() ||
@@ -632,7 +626,7 @@ fn find_max_match_length(
 }
 
 /// Computes hash value for a 3-byte sequence.
-fn compute_triplet_hash(triplet: &Triplet) -> TripletHash {
+fn compute_triplet_hash(triplet: &Triplet) -> u32 {
     ((triplet[0] as u32) << 16) | ((triplet[1] as u32) << 8) | triplet[2] as u32
 }
 
@@ -640,7 +634,7 @@ fn compute_triplet_hash(triplet: &Triplet) -> TripletHash {
 ///
 /// # Returns
 /// Hash map of triplet hashes to positions or error if data too small
-fn build_triplet_lookup_table(chunk: &[u8]) -> Result<HashMap<TripletHash, TripletLocations>, DataConversionError> {
+fn build_triplet_lookup_table(chunk: &[u8]) -> Result<HashMap<u32, Vec<usize>>, DataConversionError> {
     if chunk.len() < MIN_MATCH_LENGTH {
         return Err(DataConversionError::ChunkTooSmall {
             actual_size: chunk.len(),
@@ -648,7 +642,7 @@ fn build_triplet_lookup_table(chunk: &[u8]) -> Result<HashMap<TripletHash, Tripl
         });
     }
 
-    let mut lookup_table : HashMap<TripletHash, TripletLocations> = HashMap::with_capacity(HASH_TABLE_SIZE);
+    let mut lookup_table : HashMap<u32, Vec<usize>> = HashMap::with_capacity(HASH_TABLE_SIZE);
 
     for (current_position, triplet) in chunk.windows(MIN_MATCH_LENGTH).enumerate() {
         let triplet_array = [triplet[0], triplet[1], triplet[2]];
