@@ -78,11 +78,6 @@ impl Encoder for DdeltaEncoder {
 }
 
 impl DdeltaEncoder {
-    /// Creates a new DdeltaEncoder.
-    fn new() -> DdeltaEncoder {
-        DdeltaEncoder {}
-    }
-
     /// Encodes a single data chunk using delta compression against a reference.
     ///
     /// # Arguments
@@ -526,7 +521,7 @@ mod test {
             data,
             AronovichHash::new_with_u32(0),
         );
-        let (_, _, sbc_key_2) = DdeltaEncoder::default().encode_delta_chunk(
+        let (_, _, sbc_key_2) = DdeltaEncoder.encode_delta_chunk(
             sbc_map.clone(),
             data2,
             AronovichHash::new_with_u32(3),
