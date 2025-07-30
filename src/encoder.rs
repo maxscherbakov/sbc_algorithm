@@ -13,6 +13,8 @@ use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use std::sync::{Arc, Mutex, MutexGuard};
 pub use xdelta_encoder::XdeltaEncoder;
+pub use ddelta_encoder::DdeltaEncoder;
+pub use ddelta_encoder::EdeltaOptimizations;
 pub(crate) use {gdelta_encoder::GEAR, levenshtein_encoder::Action};
 
 /// A trait for encoding data clusters using Similarity Based Chunking (SBC).

@@ -17,7 +17,6 @@ const AVERAGE_CHUNK_SIZE: usize = 8 * KB;
 const CHUNK_THRESHOLD: u64 = AVERAGE_CHUNK_SIZE as u64 / 2;
 
 /// Use this enum when creating a DdeltaEncoder if you want to use the optimized version of Ddelta (Edelta).
-#[allow(dead_code)]
 pub enum EdeltaOptimizations {
     /// Use if speed is important.
     SpeedIsPriority,
@@ -96,7 +95,6 @@ impl DdeltaEncoder {
         DdeltaEncoder { edelta_optimizations: None }
     }
 
-    #[allow(dead_code)]
     pub fn new_with_edelta_optimizations(edelta_optimizations: EdeltaOptimizations) -> DdeltaEncoder {
         DdeltaEncoder { edelta_optimizations: Some(edelta_optimizations) }
     }
