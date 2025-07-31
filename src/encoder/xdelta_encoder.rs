@@ -1,6 +1,6 @@
 use crate::chunkfs_sbc::ClusterPoint;
 use crate::decoder::Decoder;
-use crate::encoder::{count_delta_chunks_with_hash, get_parent_data, Encoder};
+use crate::encoder::{count_delta_chunks_with_hash, encode_copy_instruction, encode_insert_instruction, get_parent_data, Encoder};
 use crate::{ChunkType, SBCHash, SBCKey, SBCMap};
 use chunkfs::Data;
 use chunkfs::Database;
@@ -232,27 +232,6 @@ fn encode_copy_sequence(
     }
 }
 
-/// Encodes a COPY instruction.
-///
-/// A COPY instruction consists of:
-/// - 3 bytes: Length of the data to copy.
-/// - 3 bytes: Offset in the source data where to copy from.
-///
-/// # Parameters
-/// * `equal_part_len` - Length of the data to copy (must be ≤ 2^24-1).
-/// * `copy_instruction_offset` - Offset in the source data where the matching block begins (must be ≤ 2^24-1).
-/// * `delta_code` - Output buffer where the encoded instruction will be appended.
-fn encode_copy_instruction(
-    equal_part_len: usize,
-    copy_instruction_offset: usize,
-    delta_code: &mut Vec<u8>,
-) {
-    let copy_instruction_len = &equal_part_len.to_ne_bytes()[..3];
-    let copy_instruction_offset = &copy_instruction_offset.to_ne_bytes()[..3];
-    delta_code.extend_from_slice(copy_instruction_len);
-    delta_code.extend_from_slice(copy_instruction_offset);
-}
-
 /// Encodes a matching sequence as a INSERT instruction.
 ///
 /// # Arguments
@@ -292,25 +271,6 @@ fn encode_insert_sequence(
     if !insert_data.is_empty() {
         encode_insert_instruction(insert_data, delta_code);
     }
-}
-
-/// Encodes a sequence of raw bytes as an INSERT instruction in delta encoding format.
-///
-/// # Format Specification
-/// The INSERT instruction is encoded as:
-/// - 3 bytes: Length of the data (lower 23 bits) with MSB set to 1 (flag)
-/// - N bytes: Raw data bytes to be inserted
-///
-/// # Arguments
-/// * `insert_data` - The raw byte sequence to be inserted.
-///   Maximum length supported is 2^23-1 bytes.
-/// * `delta_code` - Output buffer where the encoded instruction will be appended.
-///   Must have enough capacity for 3 + insert_data.len() bytes.
-fn encode_insert_instruction(insert_data: Vec<u8>, delta_code: &mut Vec<u8>) {
-    let len_bytes = &mut (insert_data.len() as u32).to_ne_bytes()[..3];
-    len_bytes[2] |= 1 << 7;
-    delta_code.extend_from_slice(len_bytes);
-    delta_code.extend_from_slice(&insert_data);
 }
 
 /// Computes the Adler-32 checksum for a given byte slice.

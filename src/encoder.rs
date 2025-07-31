@@ -1,6 +1,7 @@
 mod gdelta_encoder;
 mod levenshtein_encoder;
 mod xdelta_encoder;
+mod ddelta_encoder;
 mod zdelta_comprassion_error;
 pub mod zdelta_encoder;
 pub mod zdelta_match_pointers;
@@ -15,6 +16,8 @@ use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use std::sync::{Arc, Mutex, MutexGuard};
 pub use xdelta_encoder::XdeltaEncoder;
+pub use ddelta_encoder::DdeltaEncoder;
+pub use ddelta_encoder::EdeltaOptimizations;
 pub(crate) use {gdelta_encoder::GEAR, levenshtein_encoder::Action};
 
 /// A trait for encoding data clusters using Similarity Based Chunking (SBC).
@@ -87,6 +90,46 @@ pub trait Encoder {
             processed_data.into_inner().unwrap(),
         )
     }
+}
+
+/// Encodes a sequence of raw bytes as an INSERT instruction in delta encoding format.
+///
+/// # Format Specification
+/// The INSERT instruction is encoded as:
+/// - 3 bytes: Length of the data (lower 23 bits) with MSB set to 1 (flag)
+/// - N bytes: Raw data bytes to be inserted
+///
+/// # Arguments
+/// * `insert_data` - The raw byte sequence to be inserted.
+///   Maximum length supported is 2^23-1 bytes.
+/// * `delta_code` - Output buffer where the encoded instruction will be appended.
+///   Must have enough capacity for 3 + insert_data.len() bytes.
+fn encode_insert_instruction(insert_data: Vec<u8>, delta_code: &mut Vec<u8>) {
+    let len_bytes = &mut (insert_data.len() as u32).to_ne_bytes()[..3];
+    len_bytes[2] |= 1 << 7;
+    delta_code.extend_from_slice(len_bytes);
+    delta_code.extend_from_slice(&insert_data);
+}
+
+/// Encodes a COPY instruction.
+///
+/// A COPY instruction consists of:
+/// - 3 bytes: Length of the data to copy.
+/// - 3 bytes: Offset in the source data where to copy from.
+///
+/// # Parameters
+/// * `equal_part_len` - Length of the data to copy (must be ≤ 2^24-1).
+/// * `copy_instruction_offset` - Offset in the source data where the matching block begins (must be ≤ 2^24-1).
+/// * `delta_code` - Output buffer where the encoded instruction will be appended.
+fn encode_copy_instruction(
+    equal_part_length: usize,
+    copy_instruction_offset: usize,
+    delta_code: &mut Vec<u8>,
+) {
+    let copy_instruction_len = &equal_part_length.to_ne_bytes()[..3];
+    let copy_instruction_offset = &copy_instruction_offset.to_ne_bytes()[..3];
+    delta_code.extend_from_slice(copy_instruction_len);
+    delta_code.extend_from_slice(copy_instruction_offset);
 }
 
 fn count_delta_chunks_with_hash<D: Decoder, Hash: SBCHash>(
