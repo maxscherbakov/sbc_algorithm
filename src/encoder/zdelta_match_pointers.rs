@@ -1,8 +1,7 @@
-const SMALL_OFFSET_THRESHOLD : i16 = 256;
+const SMALL_OFFSET_THRESHOLD: i16 = 256;
 
 /// Types of reference pointers used in delta compression.
-#[derive(Debug)]
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum ReferencePointerType {
     /// Main reference pointer (primary pointer into reference data).
     Main,
@@ -26,7 +25,11 @@ pub struct MatchPointers {
 impl MatchPointers {
     /// Creates new MatchPointers with specified initial positions.
     pub fn new(target_ptr: usize, main_ref_ptr: usize, auxiliary_ref_ptr: usize) -> Self {
-        MatchPointers { target_ptr, main_ref_ptr, auxiliary_ref_ptr }
+        MatchPointers {
+            target_ptr,
+            main_ref_ptr,
+            auxiliary_ref_ptr,
+        }
     }
 
     pub fn get(&self, pointer: &ReferencePointerType) -> usize {
@@ -68,7 +71,7 @@ impl MatchPointers {
         &mut self,
         match_end_position: usize,
         offset: i16,
-        pointer_type: ReferencePointerType
+        pointer_type: ReferencePointerType,
     ) {
         match pointer_type {
             ReferencePointerType::TargetLocal => self.target_ptr = match_end_position,
@@ -94,31 +97,41 @@ impl MatchPointers {
         match_end_position: usize,
         offset: i16,
         pointer_type: ReferencePointerType,
-        previous_match_offset: Option<i16>
+        previous_match_offset: Option<i16>,
     ) {
         match pointer_type {
             ReferencePointerType::TargetLocal => {
                 self.target_ptr = match_end_position;
-            },
+            }
             _ => {
                 if let Some(previous_offset) = previous_match_offset {
-                    if previous_offset.abs() < SMALL_OFFSET_THRESHOLD && offset.abs() < SMALL_OFFSET_THRESHOLD {
+                    if previous_offset.abs() < SMALL_OFFSET_THRESHOLD
+                        && offset.abs() < SMALL_OFFSET_THRESHOLD
+                    {
                         match pointer_type {
                             ReferencePointerType::Main => self.main_ref_ptr = match_end_position,
-                            ReferencePointerType::Auxiliary => self.auxiliary_ref_ptr = match_end_position,
+                            ReferencePointerType::Auxiliary => {
+                                self.auxiliary_ref_ptr = match_end_position
+                            }
                             _ => {}
                         }
                     } else {
                         match pointer_type {
-                            ReferencePointerType::Main => self.auxiliary_ref_ptr = match_end_position,
-                            ReferencePointerType::Auxiliary => self.main_ref_ptr = match_end_position,
+                            ReferencePointerType::Main => {
+                                self.auxiliary_ref_ptr = match_end_position
+                            }
+                            ReferencePointerType::Auxiliary => {
+                                self.main_ref_ptr = match_end_position
+                            }
                             _ => {}
                         }
                     }
                 } else {
                     match pointer_type {
                         ReferencePointerType::Main => self.main_ref_ptr = match_end_position,
-                        ReferencePointerType::Auxiliary => self.auxiliary_ref_ptr = match_end_position,
+                        ReferencePointerType::Auxiliary => {
+                            self.auxiliary_ref_ptr = match_end_position
+                        }
                         _ => {}
                     }
                 }
@@ -230,7 +243,8 @@ mod tests {
     }
 
     #[test]
-    fn calculate_offset_should_return_target_local_with_negative_offset_when_position_before_target_ptr() {
+    fn calculate_offset_should_return_target_local_with_negative_offset_when_position_before_target_ptr(
+    ) {
         let pointers = MatchPointers::new(100, 200, 300);
         let (offset, pointer_type) = pointers.calculate_offset(50);
         assert_eq!(offset, -50);

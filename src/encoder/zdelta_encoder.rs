@@ -1,16 +1,18 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::cmp::min;
+use crate::chunkfs_sbc::ClusterPoint;
+use crate::decoder::Decoder;
+use crate::encoder::zdelta_comprassion_error::{
+    DataConversionError, MatchEncodingError, StorageError,
+};
+use crate::encoder::zdelta_match_pointers::{MatchPointers, ReferencePointerType};
+use crate::encoder::{count_delta_chunks_with_hash, get_parent_data, Encoder};
+use crate::hasher::SBCHash;
+use crate::{ChunkType, SBCKey, SBCMap};
 use bit_vec::BitVec;
 use chunkfs::{Data, Database};
 use huffman_compress::{Book, CodeBuilder, Tree};
-use crate::decoder::Decoder;
-use crate::hasher::SBCHash;
-use crate::{ChunkType, SBCKey, SBCMap};
-use crate::chunkfs_sbc::ClusterPoint;
-use crate::encoder::{count_delta_chunks_with_hash, get_parent_data, Encoder};
-use crate::encoder::zdelta_match_pointers::{MatchPointers, ReferencePointerType};
-use crate::encoder::zdelta_comprassion_error::{DataConversionError, StorageError, MatchEncodingError};
+use std::cmp::min;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 const LARGE_OFFSET_PENALTY_THRESHOLD: i32 = 4096;
 const MIN_MATCH_LENGTH: usize = 3;
@@ -54,7 +56,7 @@ impl Encoder for ZdeltaEncoder {
         &self,
         target_map: Arc<Mutex<&mut SBCMap<D, Hash>>>,
         cluster: &mut [ClusterPoint<Hash>],
-        parent_hash: Hash
+        parent_hash: Hash,
     ) -> (usize, usize) {
         let parent_info = get_parent_data(target_map.clone(), parent_hash.clone(), cluster);
         let mut data_left = parent_info.data_left;
@@ -102,9 +104,10 @@ impl ZdeltaEncoder {
     pub fn new(use_huffman_encoding: bool) -> Self {
         if use_huffman_encoding {
             let (huffman_book, _) = create_default_huffman_book_and_tree();
-            Self { huffman_book: Some(huffman_book) }
-        }
-        else {
+            Self {
+                huffman_book: Some(huffman_book),
+            }
+        } else {
             Self { huffman_book: None }
         }
     }
@@ -142,16 +145,18 @@ impl ZdeltaEncoder {
         parent_triplet_lookup_table: &HashMap<u32, Vec<usize>>,
         parent_hash: Hash,
     ) -> (usize, usize, SBCKey<Hash>) {
-        let mut delta_code : Vec<u8> = Vec::new();
+        let mut delta_code: Vec<u8> = Vec::new();
         let mut uncompressed_data = 0;
         let mut pointers = MatchPointers::new(0, 0, 0);
         let mut previous_match_offset: Option<i16> = None;
         let mut bit_vec_delta_code = BitVec::new();
 
-        let mut position_in_target_data : usize = 0;
+        let mut position_in_target_data: usize = 0;
         while position_in_target_data + MIN_MATCH_LENGTH <= target_data.len() {
             let mut triplet = [0u8; 3];
-            triplet.copy_from_slice(&target_data[position_in_target_data..position_in_target_data+3]);
+            triplet.copy_from_slice(
+                &target_data[position_in_target_data..position_in_target_data + 3],
+            );
             let hash = compute_triplet_hash(&triplet);
 
             if let Some(parent_positions) = parent_triplet_lookup_table.get(&hash) {
@@ -160,42 +165,64 @@ impl ZdeltaEncoder {
                     parent_data,
                     position_in_target_data,
                     parent_positions,
-                    &pointers
+                    &pointers,
                 ) {
                     if match_length < MIN_MATCH_LENGTH {
-                        self.encode_literal(target_data[position_in_target_data], &mut delta_code, &mut bit_vec_delta_code, &mut uncompressed_data);
+                        self.encode_literal(
+                            target_data[position_in_target_data],
+                            &mut delta_code,
+                            &mut bit_vec_delta_code,
+                            &mut uncompressed_data,
+                        );
                         position_in_target_data += 1;
                         continue;
                     }
                     if let Some(book) = self.huffman_book() {
-                        match encode_match_huffman(match_length, offset, &pointer_type, book, target_data.len() - position_in_target_data) {
+                        match encode_match_huffman(
+                            match_length,
+                            offset,
+                            &pointer_type,
+                            book,
+                            target_data.len() - position_in_target_data,
+                        ) {
                             Ok(encoded) => {
                                 bit_vec_delta_code.extend(&encoded);
                             }
                             Err(_) => {
-                                log::warn!("Invalid match length \
+                                log::warn!(
+                                    "Invalid match length \
                                 (allowed: {MIN_MATCH_LENGTH}-{MAX_MATCH_LENGTH}), \
-                                falling back to literal encoding");
+                                falling back to literal encoding"
+                                );
 
-                                for &byte in &target_data[position_in_target_data..position_in_target_data+ match_length] {
+                                for &byte in &target_data[position_in_target_data
+                                    ..position_in_target_data + match_length]
+                                {
                                     self.encode_literal(
                                         byte,
                                         &mut delta_code,
                                         &mut bit_vec_delta_code,
-                                        &mut uncompressed_data
+                                        &mut uncompressed_data,
                                     );
                                 }
                             }
                         }
                     } else {
-                        match encode_match_raw(match_length, offset, &pointer_type, target_data.len() - position_in_target_data) {
+                        match encode_match_raw(
+                            match_length,
+                            offset,
+                            &pointer_type,
+                            target_data.len() - position_in_target_data,
+                        ) {
                             Ok(encoded) => delta_code.extend_from_slice(&encoded),
                             Err(e) => {
                                 match e {
                                     MatchEncodingError::InvalidLength(..) => {
-                                        log::warn!("Invalid match length \
+                                        log::warn!(
+                                            "Invalid match length \
                                         (allowed: {MIN_MATCH_LENGTH}-{MAX_MATCH_LENGTH}), \
-                                        falling back to literal encoding");
+                                        falling back to literal encoding"
+                                        );
                                     }
                                     MatchEncodingError::InvalidParameterCombination => {
                                         log::error!(
@@ -203,7 +230,9 @@ impl ZdeltaEncoder {
                                         (length: {match_length}, offset: {offset}, pointer: {pointer_type:?})");
                                     }
                                 }
-                                for &byte in &target_data[position_in_target_data..position_in_target_data+ match_length] {
+                                for &byte in &target_data[position_in_target_data
+                                    ..position_in_target_data + match_length]
+                                {
                                     delta_code.push(byte);
                                     uncompressed_data += 1;
                                 }
@@ -218,19 +247,34 @@ impl ZdeltaEncoder {
                             (base_ptr as isize + offset as isize + match_length as isize) as usize
                         }
                     };
-                    pointers.smart_update_after_match(reference_match_end, offset, pointer_type, previous_match_offset);
+                    pointers.smart_update_after_match(
+                        reference_match_end,
+                        offset,
+                        pointer_type,
+                        previous_match_offset,
+                    );
                     previous_match_offset = Some(offset);
                     position_in_target_data += match_length;
                     continue;
                 }
             }
 
-            self.encode_literal(target_data[position_in_target_data], &mut delta_code, &mut bit_vec_delta_code, &mut uncompressed_data);
+            self.encode_literal(
+                target_data[position_in_target_data],
+                &mut delta_code,
+                &mut bit_vec_delta_code,
+                &mut uncompressed_data,
+            );
             position_in_target_data += 1;
         }
 
         while position_in_target_data < target_data.len() {
-            self.encode_literal(target_data[position_in_target_data], &mut delta_code, &mut bit_vec_delta_code, &mut uncompressed_data);
+            self.encode_literal(
+                target_data[position_in_target_data],
+                &mut delta_code,
+                &mut bit_vec_delta_code,
+                &mut uncompressed_data,
+            );
             position_in_target_data += 1;
         }
         if self.huffman_book().is_some() {
@@ -241,7 +285,7 @@ impl ZdeltaEncoder {
             Ok(key) => key,
             Err(StorageError::LockFailed(e)) => {
                 panic!("Critical storage lock failure: {e}");
-            },
+            }
             Err(StorageError::InsertionFailed(e)) => {
                 panic!("Non-critical insertion failure: {e}");
             }
@@ -288,9 +332,9 @@ fn store_delta_chunk<D: Decoder, Hash: SBCHash>(
     parent_hash: Hash,
     delta_code: Vec<u8>,
 ) -> Result<SBCKey<Hash>, StorageError> {
-    let mut target_map_lock = target_map.lock().map_err(|e| {
-        StorageError::LockFailed(format!("Failed to acquire lock: {e}"))
-    })?;
+    let mut target_map_lock = target_map
+        .lock()
+        .map_err(|e| StorageError::LockFailed(format!("Failed to acquire lock: {e}")))?;
     let number_delta_chunk = count_delta_chunks_with_hash(&target_map_lock, &target_hash);
     let sbc_hash = SBCKey {
         hash: target_hash,
@@ -300,9 +344,9 @@ fn store_delta_chunk<D: Decoder, Hash: SBCHash>(
         },
     };
 
-    target_map_lock.insert(sbc_hash.clone(), delta_code).map_err(|e| {
-        StorageError::InsertionFailed(format!("Failed to insert delta chunk: {e}"))
-    })?;
+    target_map_lock
+        .insert(sbc_hash.clone(), delta_code)
+        .map_err(|e| StorageError::InsertionFailed(format!("Failed to insert delta chunk: {e}")))?;
 
     Ok(sbc_hash)
 }
@@ -342,7 +386,8 @@ fn encode_match_huffman(
         ));
     }
 
-    let (length_remainder, length_coefficient) = calculate_length_components(effective_length, data_length);
+    let (length_remainder, length_coefficient) =
+        calculate_length_components(effective_length, data_length);
     let is_positive_offset = offset >= 0;
 
     let flag = encode_match_flag(length_coefficient, pointer_type, is_positive_offset)?;
@@ -353,10 +398,14 @@ fn encode_match_huffman(
     use bit_vec::BitVec;
     let mut buffer = BitVec::new();
 
-    book.encode(&mut buffer, &flag).expect("Flag codes (1-20) must be in codebook");
-    book.encode(&mut buffer, &length_remainder).expect("Length remainders (0-255) must be in codebook");
-    book.encode(&mut buffer, &offset_high).expect("Offset bytes (0-255) must be in codebook");
-    book.encode(&mut buffer, &offset_low).expect("Offset bytes (0-255) must be in codebook");
+    book.encode(&mut buffer, &flag)
+        .expect("Flag codes (1-20) must be in codebook");
+    book.encode(&mut buffer, &length_remainder)
+        .expect("Length remainders (0-255) must be in codebook");
+    book.encode(&mut buffer, &offset_high)
+        .expect("Offset bytes (0-255) must be in codebook");
+    book.encode(&mut buffer, &offset_low)
+        .expect("Offset bytes (0-255) must be in codebook");
 
     Ok(buffer)
 }
@@ -409,15 +458,14 @@ pub fn create_default_huffman_book_and_tree() -> (Book<u8>, Tree<u8>) {
 ///
 /// # Returns
 /// Encoded BitVec or error if encoding fails.
-fn encode_literal_huffman(
-    literal: u8,
-    book: &Book<u8>,
-) -> BitVec {
+fn encode_literal_huffman(literal: u8, book: &Book<u8>) -> BitVec {
     use bit_vec::BitVec;
     let mut buffer = BitVec::new();
 
-    book.encode(&mut buffer, &LITERAL_FLAG).expect("Literal flag must be in codebook");
-    book.encode(&mut buffer, &literal).expect("All literals (0-255) must be in codebook");
+    book.encode(&mut buffer, &LITERAL_FLAG)
+        .expect("Literal flag must be in codebook");
+    book.encode(&mut buffer, &literal)
+        .expect("All literals (0-255) must be in codebook");
 
     buffer
 }
@@ -451,7 +499,8 @@ fn encode_match_raw(
         ));
     }
 
-    let (length_remainder, length_coefficient) = calculate_length_components(effective_length, data_length);
+    let (length_remainder, length_coefficient) =
+        calculate_length_components(effective_length, data_length);
     let is_positive_offset = offset >= 0;
 
     let flag = encode_match_flag(length_coefficient, pointer_type, is_positive_offset)?;
@@ -471,7 +520,8 @@ fn encode_match_raw(
 /// # Returns
 /// Tuple of (remainder, coefficient).
 fn calculate_length_components(match_length: usize, max_length: usize) -> (u8, u8) {
-    let effective_length = min(match_length, max_length).clamp(MIN_MATCH_LENGTH, MAX_MATCH_LENGTH) - MIN_MATCH_LENGTH;
+    let effective_length =
+        min(match_length, max_length).clamp(MIN_MATCH_LENGTH, MAX_MATCH_LENGTH) - MIN_MATCH_LENGTH;
 
     let length_coefficient = (effective_length / LENGTH_BLOCK_SIZE) as u8;
     let length_remainder = (effective_length % LENGTH_BLOCK_SIZE) as u8;
@@ -559,7 +609,9 @@ fn select_best_match(
             continue;
         }
 
-        if let Some(length) = find_max_match_length(target_data, parent_data, current_position, parent_position) {
+        if let Some(length) =
+            find_max_match_length(target_data, parent_data, current_position, parent_position)
+        {
             let (offset, pointer_type) = pointers.calculate_offset(parent_position);
 
             let safe_length = if pointer_type == ReferencePointerType::TargetLocal {
@@ -574,7 +626,8 @@ fn select_best_match(
                 length
             };
 
-            let score = (adjusted_length << SCORE_LENGTH_SHIFT) | (!offset.abs() as usize & MAX_SCORE_OFFSET);
+            let score = (adjusted_length << SCORE_LENGTH_SHIFT)
+                | (!offset.abs() as usize & MAX_SCORE_OFFSET);
 
             if score > best_score && safe_length >= MIN_MATCH_LENGTH {
                 best_score = score;
@@ -605,21 +658,25 @@ fn find_max_match_length(
     start_position_in_target: usize,
     start_position_in_parent: usize,
 ) -> Option<usize> {
-    if start_position_in_target + MIN_MATCH_LENGTH > target_data.len() ||
-        start_position_in_parent + MIN_MATCH_LENGTH > parent_data.len() ||
-        target_data[start_position_in_target..start_position_in_target + MIN_MATCH_LENGTH] !=
-            parent_data[start_position_in_parent..start_position_in_parent + MIN_MATCH_LENGTH] {
+    if start_position_in_target + MIN_MATCH_LENGTH > target_data.len()
+        || start_position_in_parent + MIN_MATCH_LENGTH > parent_data.len()
+        || target_data[start_position_in_target..start_position_in_target + MIN_MATCH_LENGTH]
+            != parent_data[start_position_in_parent..start_position_in_parent + MIN_MATCH_LENGTH]
+    {
         return None;
     }
 
     let max_possible_match_length = min(
         parent_data.len() - start_position_in_parent,
         target_data.len() - start_position_in_target,
-    ).min(MAX_MATCH_LENGTH);
+    )
+    .min(MAX_MATCH_LENGTH);
 
     let mut match_length = MIN_MATCH_LENGTH;
     while match_length < max_possible_match_length
-    && target_data[start_position_in_target + match_length] == parent_data[start_position_in_parent + match_length] {
+        && target_data[start_position_in_target + match_length]
+            == parent_data[start_position_in_parent + match_length]
+    {
         match_length += 1;
     }
     Some(match_length)
@@ -634,7 +691,9 @@ fn compute_triplet_hash(triplet: &Triplet) -> u32 {
 ///
 /// # Returns
 /// Hash map of triplet hashes to positions or error if data too small
-fn build_triplet_lookup_table(chunk: &[u8]) -> Result<HashMap<u32, Vec<usize>>, DataConversionError> {
+fn build_triplet_lookup_table(
+    chunk: &[u8],
+) -> Result<HashMap<u32, Vec<usize>>, DataConversionError> {
     if chunk.len() < MIN_MATCH_LENGTH {
         return Err(DataConversionError::ChunkTooSmall {
             actual_size: chunk.len(),
@@ -642,7 +701,7 @@ fn build_triplet_lookup_table(chunk: &[u8]) -> Result<HashMap<u32, Vec<usize>>, 
         });
     }
 
-    let mut lookup_table : HashMap<u32, Vec<usize>> = HashMap::with_capacity(HASH_TABLE_SIZE);
+    let mut lookup_table: HashMap<u32, Vec<usize>> = HashMap::with_capacity(HASH_TABLE_SIZE);
 
     for (current_position, triplet) in chunk.windows(MIN_MATCH_LENGTH).enumerate() {
         let triplet_array = [triplet[0], triplet[1], triplet[2]];
@@ -659,13 +718,13 @@ fn build_triplet_lookup_table(chunk: &[u8]) -> Result<HashMap<u32, Vec<usize>>, 
 
 #[cfg(test)]
 mod tests {
-    use huffman_compress::Book;
-    use bit_vec::BitVec;
-    use crate::decoder::ZdeltaDecoder;
-    use crate::hasher::AronovichHash;
-    use std::sync::{Arc, Mutex};
-    use crate::encoder::encode_simple_chunk;
     use super::*;
+    use crate::decoder::ZdeltaDecoder;
+    use crate::encoder::encode_simple_chunk;
+    use crate::hasher::AronovichHash;
+    use bit_vec::BitVec;
+    use huffman_compress::Book;
+    use std::sync::{Arc, Mutex};
 
     const TEST_DATA_SIZE: usize = 9008 + 100;
 
@@ -782,10 +841,7 @@ mod tests {
     fn create_map_and_key(
         reference_data: &[u8],
         target_data: &[u8],
-    ) -> (
-        SBCMap<ZdeltaDecoder, AronovichHash>,
-        SBCKey<AronovichHash>,
-    ) {
+    ) -> (SBCMap<ZdeltaDecoder, AronovichHash>, SBCKey<AronovichHash>) {
         let mut binding = SBCMap::new(ZdeltaDecoder::new(true));
         let sbc_map = Arc::new(Mutex::new(&mut binding));
 
@@ -820,15 +876,12 @@ mod tests {
         ];
 
         for (length, offset, pointer_type, _) in test_cases {
-            let result = encode_match_huffman(
-                length,
-                offset as i16,
-                &pointer_type,
-                &book,
-                length,
-            );
+            let result = encode_match_huffman(length, offset as i16, &pointer_type, &book, length);
 
-            assert!(result.is_ok(), "Failed to encode length {length}, offset {offset}");
+            assert!(
+                result.is_ok(),
+                "Failed to encode length {length}, offset {offset}"
+            );
             let encoded = result.unwrap();
             assert!(!encoded.is_empty(), "Encoded data should not be empty");
         }
@@ -845,13 +898,7 @@ mod tests {
         ];
 
         for (length, offset, pointer_type, _) in test_cases {
-            let result = encode_match_huffman(
-                length,
-                offset as i16,
-                &pointer_type,
-                &book,
-                length,
-            );
+            let result = encode_match_huffman(length, offset as i16, &pointer_type, &book, length);
 
             assert!(result.is_err());
             assert_eq!(
@@ -865,14 +912,12 @@ mod tests {
     fn encode_match_huffman_should_produce_different_output_for_different_inputs() {
         let book = create_test_huffman_book();
 
-        let case1 = encode_match_huffman(
-            10, 100, &ReferencePointerType::Main, &book, 10).unwrap();
+        let case1 = encode_match_huffman(10, 100, &ReferencePointerType::Main, &book, 10).unwrap();
 
-        let case2 = encode_match_huffman(
-            10, 101, &ReferencePointerType::Main, &book, 10).unwrap();
+        let case2 = encode_match_huffman(10, 101, &ReferencePointerType::Main, &book, 10).unwrap();
 
-        let case3 = encode_match_huffman(
-            11, 100, &ReferencePointerType::Auxiliary, &book, 11).unwrap();
+        let case3 =
+            encode_match_huffman(11, 100, &ReferencePointerType::Auxiliary, &book, 11).unwrap();
 
         assert_ne!(case1, case2);
         assert_ne!(case1, case3);
@@ -883,9 +928,11 @@ mod tests {
     fn encode_match_huffman_should_handle_edge_cases_correctly() {
         let book = create_test_huffman_book();
 
-        let max_offset = encode_match_huffman(10, 32767, &ReferencePointerType::Main, &book, 10).unwrap();
+        let max_offset =
+            encode_match_huffman(10, 32767, &ReferencePointerType::Main, &book, 10).unwrap();
 
-        let min_offset = encode_match_huffman(10, 0, &ReferencePointerType::Main, &book, 10).unwrap();
+        let min_offset =
+            encode_match_huffman(10, 0, &ReferencePointerType::Main, &book, 10).unwrap();
 
         assert!(!max_offset.is_empty());
         assert!(!min_offset.is_empty());
@@ -896,11 +943,11 @@ mod tests {
     fn create_default_huffman_book_and_tree_should_return_valid_book_for_all_supported_symbols() {
         let (book, _) = create_default_huffman_book_and_tree();
 
-        assert!(!encode_to_bits(&book, 1).is_empty());    // Flag
-        assert!(!encode_to_bits(&book, 65).is_empty());   // Literal
-        assert!(!encode_to_bits(&book, 200).is_empty());  // Non-ASCII
-        assert!(!encode_to_bits(&book, 30).is_empty());   // Length remainder
-        assert!(!encode_to_bits(&book, 150).is_empty());  // Offset
+        assert!(!encode_to_bits(&book, 1).is_empty()); // Flag
+        assert!(!encode_to_bits(&book, 65).is_empty()); // Literal
+        assert!(!encode_to_bits(&book, 200).is_empty()); // Non-ASCII
+        assert!(!encode_to_bits(&book, 30).is_empty()); // Length remainder
+        assert!(!encode_to_bits(&book, 150).is_empty()); // Offset
     }
 
     #[test]
@@ -916,7 +963,8 @@ mod tests {
     }
 
     #[test]
-    fn create_default_huffman_book_and_tree_should_assign_shorter_codes_to_ascii_vs_non_ascii_literals() {
+    fn create_default_huffman_book_and_tree_should_assign_shorter_codes_to_ascii_vs_non_ascii_literals(
+    ) {
         let (book, _) = create_default_huffman_book_and_tree();
 
         let ascii_len = encode_to_bits(&book, 65).len();
@@ -930,7 +978,10 @@ mod tests {
         let (book, _) = create_default_huffman_book_and_tree();
 
         for i in 0..=255u8 {
-            assert!(!encode_to_bits(&book, i).is_empty(), "Failed to encode byte {i}");
+            assert!(
+                !encode_to_bits(&book, i).is_empty(),
+                "Failed to encode byte {i}"
+            );
         }
     }
 
@@ -976,31 +1027,70 @@ mod tests {
     #[test]
     fn encode_match_raw_should_reject_length_above_maximum() {
         let result = encode_match_raw(2000, 100, &ReferencePointerType::Main, 2000);
-        assert_eq!(result, Err(MatchEncodingError::InvalidLength(2000, 3, 1026)));
+        assert_eq!(
+            result,
+            Err(MatchEncodingError::InvalidLength(2000, 3, 1026))
+        );
     }
 
     #[test]
     fn encode_match_flag_should_return_correct_flag_for_target_local() {
-        assert_eq!(encode_match_flag(0, &ReferencePointerType::TargetLocal, true), Ok(1));
-        assert_eq!(encode_match_flag(1, &ReferencePointerType::TargetLocal, false), Ok(6));
-        assert_eq!(encode_match_flag(2, &ReferencePointerType::TargetLocal, true), Ok(11));
-        assert_eq!(encode_match_flag(3, &ReferencePointerType::TargetLocal, false), Ok(16));
+        assert_eq!(
+            encode_match_flag(0, &ReferencePointerType::TargetLocal, true),
+            Ok(1)
+        );
+        assert_eq!(
+            encode_match_flag(1, &ReferencePointerType::TargetLocal, false),
+            Ok(6)
+        );
+        assert_eq!(
+            encode_match_flag(2, &ReferencePointerType::TargetLocal, true),
+            Ok(11)
+        );
+        assert_eq!(
+            encode_match_flag(3, &ReferencePointerType::TargetLocal, false),
+            Ok(16)
+        );
     }
 
     #[test]
     fn encode_match_flag_should_return_correct_flag_for_main_pointer() {
-        assert_eq!(encode_match_flag(0, &ReferencePointerType::Main, true), Ok(2));
-        assert_eq!(encode_match_flag(1, &ReferencePointerType::Main, true), Ok(7));
-        assert_eq!(encode_match_flag(2, &ReferencePointerType::Main, false), Ok(13));
-        assert_eq!(encode_match_flag(3, &ReferencePointerType::Main, false), Ok(18));
+        assert_eq!(
+            encode_match_flag(0, &ReferencePointerType::Main, true),
+            Ok(2)
+        );
+        assert_eq!(
+            encode_match_flag(1, &ReferencePointerType::Main, true),
+            Ok(7)
+        );
+        assert_eq!(
+            encode_match_flag(2, &ReferencePointerType::Main, false),
+            Ok(13)
+        );
+        assert_eq!(
+            encode_match_flag(3, &ReferencePointerType::Main, false),
+            Ok(18)
+        );
     }
 
     #[test]
     fn encode_match_flag_should_return_correct_flag_for_auxiliary_pointer() {
-        assert_eq!(encode_match_flag(0, &ReferencePointerType::Auxiliary, true), Ok(4));
-        assert_eq!(encode_match_flag(1, &ReferencePointerType::Auxiliary, true), Ok(9));
-        assert_eq!(encode_match_flag(2, &ReferencePointerType::Auxiliary, false), Ok(15));
-        assert_eq!(encode_match_flag(3, &ReferencePointerType::Auxiliary, false), Ok(20));
+        assert_eq!(
+            encode_match_flag(0, &ReferencePointerType::Auxiliary, true),
+            Ok(4)
+        );
+        assert_eq!(
+            encode_match_flag(1, &ReferencePointerType::Auxiliary, true),
+            Ok(9)
+        );
+        assert_eq!(
+            encode_match_flag(2, &ReferencePointerType::Auxiliary, false),
+            Ok(15)
+        );
+        assert_eq!(
+            encode_match_flag(3, &ReferencePointerType::Auxiliary, false),
+            Ok(20)
+        );
     }
 
     #[test]
@@ -1013,7 +1103,10 @@ mod tests {
 
     #[test]
     fn calculate_length_components_should_calculate_correctly_for_min_length() {
-        assert_eq!(calculate_length_components(MIN_MATCH_LENGTH, MIN_MATCH_LENGTH), (0, 0));
+        assert_eq!(
+            calculate_length_components(MIN_MATCH_LENGTH, MIN_MATCH_LENGTH),
+            (0, 0)
+        );
         assert_eq!(calculate_length_components(MIN_MATCH_LENGTH, 10), (0, 0));
     }
 
@@ -1028,7 +1121,10 @@ mod tests {
     fn calculate_length_components_should_calculate_correctly_for_max_length() {
         assert_eq!(calculate_length_components(1024, 1024), (253, 3));
         assert_eq!(calculate_length_components(1026, 1024), (253, 3));
-        assert_eq!(calculate_length_components(MAX_MATCH_LENGTH, MAX_MATCH_LENGTH), (255, 3));
+        assert_eq!(
+            calculate_length_components(MAX_MATCH_LENGTH, MAX_MATCH_LENGTH),
+            (255, 3)
+        );
     }
 
     #[test]
@@ -1173,32 +1269,20 @@ mod tests {
             table.get(&compute_triplet_hash(b"abc")),
             Some(&vec![0, 3, 6])
         );
-        assert_eq!(
-            table.get(&compute_triplet_hash(b"bca")),
-            Some(&vec![1, 4])
-        );
-        assert_eq!(
-            table.get(&compute_triplet_hash(b"cab")),
-            Some(&vec![2, 5])
-        );
+        assert_eq!(table.get(&compute_triplet_hash(b"bca")), Some(&vec![1, 4]));
+        assert_eq!(table.get(&compute_triplet_hash(b"cab")), Some(&vec![2, 5]));
     }
 
     #[test]
     fn compute_triplet_hash_should_return_correct_hash_for_normal_triplet() {
-        let data : Triplet = [1, 2, 3];
+        let data: Triplet = [1, 2, 3];
         assert_eq!(compute_triplet_hash(&data), 0x010203);
     }
 
     #[test]
     fn compute_triplet_hash_should_return_correct_hash_for_edge_case_values() {
-        assert_eq!(
-            compute_triplet_hash(&[0, 0, 0]),
-            0x000000
-        );
-        assert_eq!(
-            compute_triplet_hash(&[255, 255, 255]),
-            0xFFFFFF
-        );
+        assert_eq!(compute_triplet_hash(&[0, 0, 0]), 0x000000);
+        assert_eq!(compute_triplet_hash(&[255, 255, 255]), 0xFFFFFF);
     }
 
     fn create_test_data_for_find_max_match_length<'a>() -> (&'a [u8], &'a [u8]) {
@@ -1209,7 +1293,8 @@ mod tests {
 
     fn encode_to_bits(book: &Book<u8>, symbol: u8) -> BitVec {
         let mut buffer = BitVec::new();
-        book.encode(&mut buffer, &symbol).expect("Encoding failed in test");
+        book.encode(&mut buffer, &symbol)
+            .expect("Encoding failed in test");
         buffer
     }
 

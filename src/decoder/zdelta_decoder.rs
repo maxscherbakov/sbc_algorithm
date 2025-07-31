@@ -1,8 +1,8 @@
+use crate::decoder::Decoder;
+use crate::encoder::zdelta_encoder;
+use crate::encoder::zdelta_match_pointers::{MatchPointers, ReferencePointerType};
 use bit_vec::BitVec;
 use huffman_compress::Tree;
-use crate::decoder::Decoder;
-use crate::encoder::zdelta_match_pointers::{MatchPointers, ReferencePointerType};
-use crate::encoder::zdelta_encoder;
 use thiserror::Error;
 
 /// Flag indicating a literal byte follows in the delta stream.
@@ -32,9 +32,10 @@ impl ZdeltaDecoder {
     pub fn new(use_huffman_encoding: bool) -> Self {
         if use_huffman_encoding {
             let (_, huffman_tree) = zdelta_encoder::create_default_huffman_book_and_tree();
-            Self { huffman_tree: Some(huffman_tree) }
-        }
-        else {
+            Self {
+                huffman_tree: Some(huffman_tree),
+            }
+        } else {
             Self { huffman_tree: None }
         }
     }
@@ -73,11 +74,9 @@ impl ZdeltaDecoder {
                     continue;
                 }
             } else if (1..=20).contains(&flag) {
-                if let (Some(length_remainder), Some(offset_high), Some(offset_low)) = (
-                    decoder.next(),
-                    decoder.next(),
-                    decoder.next(),
-                ) {
+                if let (Some(length_remainder), Some(offset_high), Some(offset_low)) =
+                    (decoder.next(), decoder.next(), decoder.next())
+                {
                     output.push(flag);
                     output.push(length_remainder);
                     output.push(offset_high);
@@ -149,15 +148,17 @@ impl Decoder for ZdeltaDecoder {
             let (length_coefficient, pointer_type, is_positive) = match decode_flag(flag) {
                 Ok(res) => res,
                 Err(e) => {
-                    log::error!("Invalid flag {flag} at index {index_in_data_to_decode}, skipping: {e:?}");
+                    log::error!(
+                        "Invalid flag {flag} at index {index_in_data_to_decode}, skipping: {e:?}"
+                    );
                     index_in_data_to_decode += 1;
                     continue;
                 }
             };
 
-            let match_length = MIN_MATCH_LENGTH +
-                length_remainder as usize +
-                (length_coefficient as usize * LENGTH_BLOCK_SIZE);
+            let match_length = MIN_MATCH_LENGTH
+                + length_remainder as usize
+                + (length_coefficient as usize * LENGTH_BLOCK_SIZE);
 
             if match_length > MAX_MATCH_LENGTH {
                 log::error!("Match length {match_length} exceeds MAX_MATCH_LENGTH at index {index_in_data_to_decode}");
@@ -226,7 +227,9 @@ fn process_match(
         }
     };
 
-    let end_position = source_position.checked_add(length).ok_or(DecodeError::Length)?;
+    let end_position = source_position
+        .checked_add(length)
+        .ok_or(DecodeError::Length)?;
 
     match pointer_type {
         ReferencePointerType::TargetLocal => {
@@ -250,7 +253,7 @@ fn process_match(
         source_position + length,
         offset,
         pointer_type,
-        *previous_offset
+        *previous_offset,
     );
     *previous_offset = Some(offset);
     Ok(())
@@ -297,13 +300,13 @@ pub enum DecodeError {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use huffman_compress::CodeBuilder;
-    use bit_vec::BitVec;
-    use crate::encoder::zdelta_encoder::ZdeltaEncoder;
     use super::*;
+    use crate::encoder::zdelta_encoder::ZdeltaEncoder;
     use crate::encoder::zdelta_match_pointers::ReferencePointerType;
     use crate::encoder::zdelta_match_pointers::ReferencePointerType::{Auxiliary, TargetLocal};
+    use bit_vec::BitVec;
+    use huffman_compress::CodeBuilder;
+    use std::collections::HashMap;
 
     #[test]
     fn decode_chunk_should_handle_basic_literals() {
@@ -388,18 +391,42 @@ mod tests {
         let parent_data = vec![b'x'; 5000];
         let mut previous_offset = None;
 
-        process_match(100, 100, ReferencePointerType::Main,
-                              &parent_data, &mut pointers, &mut output, &mut previous_offset).unwrap();
+        process_match(
+            100,
+            100,
+            ReferencePointerType::Main,
+            &parent_data,
+            &mut pointers,
+            &mut output,
+            &mut previous_offset,
+        )
+        .unwrap();
         assert_eq!(pointers.get(&ReferencePointerType::Main), 200);
         assert_eq!(pointers.get(&Auxiliary), 0);
 
-        process_match(100, 50, ReferencePointerType::Main,
-                              &parent_data, &mut pointers, &mut output, &mut previous_offset).unwrap();
+        process_match(
+            100,
+            50,
+            ReferencePointerType::Main,
+            &parent_data,
+            &mut pointers,
+            &mut output,
+            &mut previous_offset,
+        )
+        .unwrap();
         assert_eq!(pointers.get(&ReferencePointerType::Main), 350);
         assert_eq!(pointers.get(&Auxiliary), 0);
 
-        process_match(100, 2000, ReferencePointerType::Main,
-                              &parent_data, &mut pointers, &mut output, &mut previous_offset).unwrap();
+        process_match(
+            100,
+            2000,
+            ReferencePointerType::Main,
+            &parent_data,
+            &mut pointers,
+            &mut output,
+            &mut previous_offset,
+        )
+        .unwrap();
         assert_eq!(pointers.get(&ReferencePointerType::Main), 350);
         assert_eq!(pointers.get(&Auxiliary), 2450);
     }
@@ -410,12 +437,33 @@ mod tests {
         let mut output = vec![b'a', b'b', b'c'];
         let parent_data = vec![];
 
-        process_match(3, -3, TargetLocal, &parent_data, &mut pointers, &mut output, &mut None).unwrap();
+        process_match(
+            3,
+            -3,
+            TargetLocal,
+            &parent_data,
+            &mut pointers,
+            &mut output,
+            &mut None,
+        )
+        .unwrap();
         assert_eq!(output, vec![b'a', b'b', b'c', b'a', b'b', b'c']);
         assert_eq!(pointers.get(&TargetLocal), 3);
 
-        process_match(3, -3, TargetLocal, &parent_data, &mut pointers, &mut output, &mut None).unwrap();
-        assert_eq!(output, vec![b'a', b'b', b'c', b'a', b'b', b'c', b'a', b'b', b'c']);
+        process_match(
+            3,
+            -3,
+            TargetLocal,
+            &parent_data,
+            &mut pointers,
+            &mut output,
+            &mut None,
+        )
+        .unwrap();
+        assert_eq!(
+            output,
+            vec![b'a', b'b', b'c', b'a', b'b', b'c', b'a', b'b', b'c']
+        );
         assert_eq!(pointers.get(&TargetLocal), 6);
     }
 
@@ -433,7 +481,8 @@ mod tests {
             &mut pointers,
             &mut output,
             &mut None,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(output, vec![b'd', b'e']);
         assert_eq!(pointers.get(&ReferencePointerType::Main), 5);
@@ -453,7 +502,8 @@ mod tests {
             &mut pointers,
             &mut output,
             &mut None,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(output, vec![b'a', b'b']);
         assert_eq!(pointers.get(&Auxiliary), 2);
@@ -530,7 +580,8 @@ mod tests {
             &mut pointers,
             &mut output,
             &mut None,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(output.len(), MAX_MATCH_LENGTH);
         assert_eq!(pointers.get(&ReferencePointerType::Main), MAX_MATCH_LENGTH);
@@ -550,7 +601,8 @@ mod tests {
             &mut pointers,
             &mut output,
             &mut None,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(output, vec![b'c', b'd']);
         assert_eq!(pointers.get(&ReferencePointerType::Main), 4);
@@ -570,7 +622,8 @@ mod tests {
             &mut pointers,
             &mut output,
             &mut None,
-        ).unwrap();
+        )
+        .unwrap();
 
         process_match(
             2,
@@ -580,7 +633,8 @@ mod tests {
             &mut pointers,
             &mut output,
             &mut None,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(output, vec![b'a', b'b', b'a', b'b']);
         assert_eq!(pointers.get(&TargetLocal), 2);
@@ -603,10 +657,7 @@ mod tests {
     fn huffman_to_raw_should_decode_multiple_matches() {
         let decoder = create_test_decoder();
 
-        let input = vec![
-            2, 7, 0, 100,
-            10, 41, 4, 0
-        ];
+        let input = vec![2, 7, 0, 100, 10, 41, 4, 0];
 
         let mut buffer = BitVec::new();
         buffer.extend(BitVec::from_bytes(&input));
@@ -651,10 +702,7 @@ mod tests {
     fn huffman_to_raw_should_decode_max_values() {
         let decoder = create_test_decoder();
 
-        let input = vec![
-            16, 255, 127, 255,
-            20, 255, 127, 254
-        ];
+        let input = vec![16, 255, 127, 255, 20, 255, 127, 254];
 
         let mut buffer = BitVec::new();
         buffer.extend(BitVec::from_bytes(&input));
@@ -686,11 +734,11 @@ mod tests {
         let decoder = create_test_decoder();
 
         let input = vec![
-            1, 10, 0, 100,    // TargetLocal
-            2, 20, 1, 200,    // Main, positive
-            3, 30, 2, 100,    // Main, negative
-            4, 40, 3, 200,    // Auxiliary, positive
-            5, 50, 4, 100     // Auxiliary, negative
+            1, 10, 0, 100, // TargetLocal
+            2, 20, 1, 200, // Main, positive
+            3, 30, 2, 100, // Main, negative
+            4, 40, 3, 200, // Auxiliary, positive
+            5, 50, 4, 100, // Auxiliary, negative
         ];
 
         let mut buffer = BitVec::new();
@@ -707,9 +755,9 @@ mod tests {
         let decoder = ZdeltaDecoder::new(true);
 
         let test_cases = vec![
-            vec![2, 7, 0, 100],     // length=10, offset=100
-            vec![10, 41, 4, 0],     // length=300, offset=-1024
-            vec![16, 255, 127, 255] // length=1026, offset=32767
+            vec![2, 7, 0, 100],      // length=10, offset=100
+            vec![10, 41, 4, 0],      // length=300, offset=-1024
+            vec![16, 255, 127, 255], // length=1026, offset=32767
         ];
 
         let mut full_bitvec = BitVec::new();
@@ -748,8 +796,18 @@ mod tests {
         let encoder = ZdeltaEncoder::new(true);
         let mut buffer = BitVec::new();
 
-        encoder.huffman_book().as_ref().unwrap().encode(&mut buffer, &LITERAL_FLAG).expect("Literal flag must be in codebook");
-        encoder.huffman_book().as_ref().unwrap().encode(&mut buffer, &b'A').expect("All literals (0-255) must be in codebook");
+        encoder
+            .huffman_book()
+            .as_ref()
+            .unwrap()
+            .encode(&mut buffer, &LITERAL_FLAG)
+            .expect("Literal flag must be in codebook");
+        encoder
+            .huffman_book()
+            .as_ref()
+            .unwrap()
+            .encode(&mut buffer, &b'A')
+            .expect("All literals (0-255) must be in codebook");
 
         let encoded = buffer.to_bytes();
 
@@ -764,31 +822,66 @@ mod tests {
         let mut buffer = BitVec::new();
 
         // Literal 'A'
-        encoder.huffman_book().as_ref().unwrap()
-            .encode(&mut buffer, &LITERAL_FLAG).expect("Literal flag must be in codebook");
-        encoder.huffman_book().as_ref().unwrap()
-            .encode(&mut buffer, &b'A').expect("Literal must be in codebook");
+        encoder
+            .huffman_book()
+            .as_ref()
+            .unwrap()
+            .encode(&mut buffer, &LITERAL_FLAG)
+            .expect("Literal flag must be in codebook");
+        encoder
+            .huffman_book()
+            .as_ref()
+            .unwrap()
+            .encode(&mut buffer, &b'A')
+            .expect("Literal must be in codebook");
 
         // Match
-        encoder.huffman_book().as_ref().unwrap()
-            .encode(&mut buffer, &2).expect("Flag must be in codebook");
-        encoder.huffman_book().as_ref().unwrap()
-            .encode(&mut buffer, &10).expect("Length remainder must be in codebook");
-        encoder.huffman_book().as_ref().unwrap()
-            .encode(&mut buffer, &0).expect("Offset high must be in codebook");
-        encoder.huffman_book().as_ref().unwrap()
-            .encode(&mut buffer, &100).expect("Offset low must be in codebook");
+        encoder
+            .huffman_book()
+            .as_ref()
+            .unwrap()
+            .encode(&mut buffer, &2)
+            .expect("Flag must be in codebook");
+        encoder
+            .huffman_book()
+            .as_ref()
+            .unwrap()
+            .encode(&mut buffer, &10)
+            .expect("Length remainder must be in codebook");
+        encoder
+            .huffman_book()
+            .as_ref()
+            .unwrap()
+            .encode(&mut buffer, &0)
+            .expect("Offset high must be in codebook");
+        encoder
+            .huffman_book()
+            .as_ref()
+            .unwrap()
+            .encode(&mut buffer, &100)
+            .expect("Offset low must be in codebook");
 
         // Literal 'B'
-        encoder.huffman_book().as_ref().unwrap()
-            .encode(&mut buffer, &LITERAL_FLAG).expect("Literal flag must be in codebook");
-        encoder.huffman_book().as_ref().unwrap()
-            .encode(&mut buffer, &b'B').expect("Literal must be in codebook");
+        encoder
+            .huffman_book()
+            .as_ref()
+            .unwrap()
+            .encode(&mut buffer, &LITERAL_FLAG)
+            .expect("Literal flag must be in codebook");
+        encoder
+            .huffman_book()
+            .as_ref()
+            .unwrap()
+            .encode(&mut buffer, &b'B')
+            .expect("Literal must be in codebook");
 
         let encoded = buffer.to_bytes();
         let decoded = decoder.huffman_to_raw(&encoded);
 
-        assert_eq!(decoded, vec![LITERAL_FLAG, b'A', 2, 10, 0, 100, LITERAL_FLAG, b'B']);
+        assert_eq!(
+            decoded,
+            vec![LITERAL_FLAG, b'A', 2, 10, 0, 100, LITERAL_FLAG, b'B']
+        );
     }
 
     #[test]
@@ -797,10 +890,18 @@ mod tests {
         let encoder = ZdeltaEncoder::new(true);
         let mut buffer = BitVec::new();
 
-        encoder.huffman_book().as_ref().unwrap()
-            .encode(&mut buffer, &21).expect("Should encode invalid flag");
-        encoder.huffman_book().as_ref().unwrap()
-            .encode(&mut buffer, &65).expect("Should encode byte");
+        encoder
+            .huffman_book()
+            .as_ref()
+            .unwrap()
+            .encode(&mut buffer, &21)
+            .expect("Should encode invalid flag");
+        encoder
+            .huffman_book()
+            .as_ref()
+            .unwrap()
+            .encode(&mut buffer, &65)
+            .expect("Should encode byte");
 
         let encoded = buffer.to_bytes();
         let decoded = decoder.huffman_to_raw(&encoded);
