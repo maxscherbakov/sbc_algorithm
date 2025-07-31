@@ -1,6 +1,9 @@
 use crate::chunkfs_sbc::ClusterPoint;
 use crate::decoder::Decoder;
-use crate::encoder::{count_delta_chunks_with_hash, encode_copy_instruction, encode_insert_instruction, get_parent_data, Encoder};
+use crate::encoder::{
+    count_delta_chunks_with_hash, encode_copy_instruction, encode_insert_instruction,
+    get_parent_data, Encoder,
+};
 use crate::{ChunkType, SBCHash, SBCKey, SBCMap};
 use chunkfs::Data;
 use chunkfs::Database;

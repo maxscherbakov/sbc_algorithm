@@ -1,7 +1,7 @@
+mod ddelta_encoder;
 mod gdelta_encoder;
 mod levenshtein_encoder;
 mod xdelta_encoder;
-mod ddelta_encoder;
 mod zdelta_comprassion_error;
 pub mod zdelta_encoder;
 pub mod zdelta_match_pointers;
@@ -10,14 +10,14 @@ use super::chunkfs_sbc::{ClusterPoint, Clusters};
 use crate::decoder::Decoder;
 use crate::{ChunkType, SBCHash, SBCKey, SBCMap};
 use chunkfs::{Data, Database, IterableDatabase};
+pub use ddelta_encoder::DdeltaEncoder;
+pub use ddelta_encoder::EdeltaOptimizations;
 pub use gdelta_encoder::GdeltaEncoder;
 pub use levenshtein_encoder::LevenshteinEncoder;
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use std::sync::{Arc, Mutex, MutexGuard};
 pub use xdelta_encoder::XdeltaEncoder;
-pub use ddelta_encoder::DdeltaEncoder;
-pub use ddelta_encoder::EdeltaOptimizations;
 pub(crate) use {gdelta_encoder::GEAR, levenshtein_encoder::Action};
 
 /// A trait for encoding data clusters using Similarity Based Chunking (SBC).

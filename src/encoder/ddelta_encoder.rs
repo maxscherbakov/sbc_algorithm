@@ -1,13 +1,16 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use chunkfs::{Data, Database};
-use fasthash::spooky;
 use crate::chunkfs_sbc::ClusterPoint;
 use crate::decoder::Decoder;
-use crate::encoder::{count_delta_chunks_with_hash, encode_copy_instruction, encode_insert_instruction, get_parent_data, Encoder};
 use crate::encoder::gdelta_encoder::GEAR;
+use crate::encoder::{
+    count_delta_chunks_with_hash, encode_copy_instruction, encode_insert_instruction,
+    get_parent_data, Encoder,
+};
 use crate::hasher::SBCHash;
 use crate::{ChunkType, SBCKey, SBCMap};
+use chunkfs::{Data, Database};
+use fasthash::spooky;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 /// One kilobyte.
 const KB: usize = 1024;
@@ -92,11 +95,17 @@ impl DdeltaEncoder {
     /// Use EdeltaOptimizations enum when creating a DdeltaEncoder if you want to use the optimized version of Ddelta (Edelta).
     /// Or pass None as a parameter.
     pub fn new() -> DdeltaEncoder {
-        DdeltaEncoder { edelta_optimizations: None }
+        DdeltaEncoder {
+            edelta_optimizations: None,
+        }
     }
 
-    pub fn new_with_edelta_optimizations(edelta_optimizations: EdeltaOptimizations) -> DdeltaEncoder {
-        DdeltaEncoder { edelta_optimizations: Some(edelta_optimizations) }
+    pub fn new_with_edelta_optimizations(
+        edelta_optimizations: EdeltaOptimizations,
+    ) -> DdeltaEncoder {
+        DdeltaEncoder {
+            edelta_optimizations: Some(edelta_optimizations),
+        }
     }
 
     /// Encodes a single data chunk using delta compression against a reference.
@@ -128,17 +137,15 @@ impl DdeltaEncoder {
         for mut target_chunk_position in 0..target_chunks.len() {
             let target_chunk = target_chunks[target_chunk_position];
             match self.edelta_optimizations {
-                Some(EdeltaOptimizations::SpeedIsPriority) => {
-                    process_target_chunk_with_edelta(
-                        source_data,
-                        target_data,
-                        source_chunks_indices,
-                        &target_chunks,
-                        &mut target_chunk_position,
-                        &mut delta_code,
-                        EdeltaOptimizations::SpeedIsPriority,
-                    )
-                }
+                Some(EdeltaOptimizations::SpeedIsPriority) => process_target_chunk_with_edelta(
+                    source_data,
+                    target_data,
+                    source_chunks_indices,
+                    &target_chunks,
+                    &mut target_chunk_position,
+                    &mut delta_code,
+                    EdeltaOptimizations::SpeedIsPriority,
+                ),
                 Some(EdeltaOptimizations::CompressionIsPriority) => {
                     process_target_chunk_with_edelta(
                         source_data,
@@ -150,14 +157,12 @@ impl DdeltaEncoder {
                         EdeltaOptimizations::CompressionIsPriority,
                     );
                 }
-                None => {
-                    process_target_chunk_with_ddelta(
-                        source_data,
-                        source_chunks_indices,
-                        target_chunk,
-                        &mut delta_code
-                    )
-                }
+                None => process_target_chunk_with_ddelta(
+                    source_data,
+                    source_chunks_indices,
+                    target_chunk,
+                    &mut delta_code,
+                ),
             }
 
             if target_chunk_position >= target_chunks.len() {
@@ -165,12 +170,8 @@ impl DdeltaEncoder {
             }
         }
 
-        let (processed_data, sbc_hash) = store_delta_chunk(
-            target_map,
-            target_hash,
-            source_hash,
-            delta_code,
-        );
+        let (processed_data, sbc_hash) =
+            store_delta_chunk(target_map, target_hash, source_hash, delta_code);
         (0, processed_data, sbc_hash)
     }
 }
@@ -191,14 +192,12 @@ fn process_target_chunk_with_edelta(
     let mut target_chunk = target_chunks[*target_chunk_position];
     match edelta_optimizations {
         EdeltaOptimizations::SpeedIsPriority => {
-            if let Some(
-                (
-                    start_match_position_in_source_data,
-                    number_of_processed_chunks,
-                    match_length,
-                    length_of_unprocessed_residue
-                )
-            ) = find_match_compression_is_priority(
+            if let Some((
+                start_match_position_in_source_data,
+                number_of_processed_chunks,
+                match_length,
+                length_of_unprocessed_residue,
+            )) = find_match_compression_is_priority(
                 source_data,
                 source_chunks_indices,
                 *target_chunk_position,
@@ -207,7 +206,7 @@ fn process_target_chunk_with_edelta(
                 encode_copy_instruction(
                     match_length,
                     start_match_position_in_source_data,
-                    delta_code
+                    delta_code,
                 );
                 *target_chunk_position += number_of_processed_chunks;
                 if length_of_unprocessed_residue == 0 {
@@ -219,7 +218,7 @@ fn process_target_chunk_with_edelta(
                     source_data,
                     source_chunks_indices,
                     &target_chunk[target_chunk.len() - length_of_unprocessed_residue..],
-                    delta_code
+                    delta_code,
                 );
             } else {
                 encode_insert_instruction(target_chunk.to_vec(), delta_code);
@@ -227,14 +226,12 @@ fn process_target_chunk_with_edelta(
             };
         }
         EdeltaOptimizations::CompressionIsPriority => {
-            if let Some(
-                (
-                    start_match_position_in_source_data,
-                    number_of_processed_chunks,
-                    match_length,
-                    length_of_unprocessed_residue
-                )
-            ) = find_match_compression_is_priority(
+            if let Some((
+                start_match_position_in_source_data,
+                number_of_processed_chunks,
+                match_length,
+                length_of_unprocessed_residue,
+            )) = find_match_compression_is_priority(
                 source_data,
                 source_chunks_indices,
                 *target_chunk_position,
@@ -243,17 +240,20 @@ fn process_target_chunk_with_edelta(
                 encode_copy_instruction(
                     match_length,
                     start_match_position_in_source_data,
-                    delta_code
+                    delta_code,
                 );
                 let mut start_match_in_target_data: usize = 0;
                 for current_target_chunk in target_chunks.iter().take(*target_chunk_position) {
                     start_match_in_target_data += current_target_chunk.len();
                 }
                 let chunk_hash = spooky::hash64(
-                    &target_data[start_match_in_target_data..start_match_in_target_data + match_length]
+                    &target_data
+                        [start_match_in_target_data..start_match_in_target_data + match_length],
                 );
 
-                source_chunks_indices.entry(chunk_hash).or_insert(start_match_position_in_source_data);
+                source_chunks_indices
+                    .entry(chunk_hash)
+                    .or_insert(start_match_position_in_source_data);
                 *target_chunk_position += number_of_processed_chunks;
                 if length_of_unprocessed_residue == 0 {
                     return;
@@ -264,7 +264,7 @@ fn process_target_chunk_with_edelta(
                     source_data,
                     source_chunks_indices,
                     &target_chunk[target_chunk.len() - length_of_unprocessed_residue..],
-                    delta_code
+                    delta_code,
                 );
             } else {
                 encode_insert_instruction(target_chunk.to_vec(), delta_code);
@@ -286,7 +286,7 @@ fn process_target_chunk_with_ddelta(
             encode_copy_instruction(
                 target_chunk.len(),
                 start_of_match_in_source_data,
-                delta_code
+                delta_code,
             );
         }
         None => {
@@ -368,7 +368,8 @@ fn find_match_compression_is_priority(
         target_chunks[target_chunk_position],
     )?;
     let mut number_of_processed_chunks = 1;
-    let mut source_byte_index = start_of_match_in_source_data + target_chunks[target_chunk_position].len();
+    let mut source_byte_index =
+        start_of_match_in_source_data + target_chunks[target_chunk_position].len();
 
     let mut match_length = target_chunks[target_chunk_position].len();
     let mut target_chunk_position = target_chunk_position + 1;
@@ -385,15 +386,26 @@ fn find_match_compression_is_priority(
 
             if source_byte_index >= source_data.len() {
                 number_of_processed_chunks += 1;
-                let length_of_unprocessed_residue = (target_chunk.len() - target_byte_index) % target_chunk.len();
-                return Some((start_of_match_in_source_data, number_of_processed_chunks, match_length, length_of_unprocessed_residue));
+                let length_of_unprocessed_residue =
+                    (target_chunk.len() - target_byte_index) % target_chunk.len();
+                return Some((
+                    start_of_match_in_source_data,
+                    number_of_processed_chunks,
+                    match_length,
+                    length_of_unprocessed_residue,
+                ));
             }
 
             if target_byte_index == 0 {
                 target_chunk_position += 1;
                 if target_chunk_position >= target_chunks.len() {
                     number_of_processed_chunks += 1;
-                    return Some((start_of_match_in_source_data, number_of_processed_chunks, match_length, 0))
+                    return Some((
+                        start_of_match_in_source_data,
+                        number_of_processed_chunks,
+                        match_length,
+                        0,
+                    ));
                 }
 
                 target_chunk = target_chunks[target_chunk_position];
@@ -403,8 +415,14 @@ fn find_match_compression_is_priority(
 
         number_of_processed_chunks += 1;
         if source_data[source_byte_index] != target_chunk[target_byte_index] {
-            let length_of_unprocessed_residue = (target_chunk.len() - target_byte_index) % target_chunk.len();
-            return Some((start_of_match_in_source_data, number_of_processed_chunks, match_length, length_of_unprocessed_residue));
+            let length_of_unprocessed_residue =
+                (target_chunk.len() - target_byte_index) % target_chunk.len();
+            return Some((
+                start_of_match_in_source_data,
+                number_of_processed_chunks,
+                match_length,
+                length_of_unprocessed_residue,
+            ));
         }
 
         if target_byte_index != 0 {
@@ -412,7 +430,12 @@ fn find_match_compression_is_priority(
         }
     }
 
-    Some((start_of_match_in_source_data, number_of_processed_chunks, match_length, 0))
+    Some((
+        start_of_match_in_source_data,
+        number_of_processed_chunks,
+        match_length,
+        0,
+    ))
 }
 
 /// Finds a matching chunk in source data for the given target chunk.
@@ -434,12 +457,12 @@ fn find_match_ddelta(
     let &source_position = source_chunks_indices.get(&target_hash)?;
 
     if source_position + target_chunk.len() > source_data.len() {
-        return None
+        return None;
     }
 
     let source_slice = &source_data[source_position..source_position + target_chunk.len()];
     if source_slice != target_chunk {
-        return None
+        return None;
     }
 
     Some(source_position)
@@ -472,7 +495,6 @@ fn build_chunks_indices(source_chunks: &Vec<&[u8]>) -> HashMap<u64, usize> {
 /// # Returns
 /// Vector of byte slices (chunks) referencing the original data.
 fn gear_chunking(data: &[u8]) -> Vec<&[u8]> {
-
     let mut source_chunks: Vec<&[u8]> = Vec::new();
     let mut current_window_hash: u64 = 0;
     let mut start_current_chunk: usize = 0;
@@ -480,7 +502,8 @@ fn gear_chunking(data: &[u8]) -> Vec<&[u8]> {
     let mask = (1 << AVERAGE_CHUNK_SIZE.next_power_of_two().trailing_zeros()) - 1;
     let mut data_index: usize = 0;
     while data_index < data.len() {
-        current_window_hash = (current_window_hash << 1).wrapping_add(GEAR[data[data_index] as usize]);
+        current_window_hash =
+            (current_window_hash << 1).wrapping_add(GEAR[data[data_index] as usize]);
         if (current_window_hash & mask) == CHUNK_THRESHOLD {
             source_chunks.push(&data[start_current_chunk..data_index]);
             start_current_chunk = data_index;
@@ -499,11 +522,13 @@ fn gear_chunking(data: &[u8]) -> Vec<&[u8]> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use rand::Rng;
     use crate::decoder;
-    use crate::encoder::ddelta_encoder::EdeltaOptimizations::{CompressionIsPriority, SpeedIsPriority};
+    use crate::encoder::ddelta_encoder::EdeltaOptimizations::{
+        CompressionIsPriority, SpeedIsPriority,
+    };
     use crate::encoder::encode_simple_chunk;
     use crate::hasher::AronovichHash;
+    use rand::Rng;
 
     #[test]
     fn process_target_chunk_with_edelta_should_process_full_match_with_compression_priority() {
@@ -682,12 +707,7 @@ mod test {
         let source_indices = build_chunks_indices(&source_chunks);
 
         assert_eq!(
-            find_match_compression_is_priority(
-                source_data,
-                &source_indices,
-                0,
-                &target_chunks
-            ),
+            find_match_compression_is_priority(source_data, &source_indices, 0, &target_chunks),
             Some((7, 2, 9, 0))
         );
     }
@@ -701,12 +721,7 @@ mod test {
         let source_indices = build_chunks_indices(&source_chunks);
 
         assert_eq!(
-            find_match_compression_is_priority(
-                source_data,
-                &source_indices,
-                0,
-                &target_chunks
-            ),
+            find_match_compression_is_priority(source_data, &source_indices, 0, &target_chunks),
             None
         );
     }
@@ -720,12 +735,7 @@ mod test {
         let source_indices = build_chunks_indices(&source_chunks);
 
         assert_eq!(
-            find_match_compression_is_priority(
-                source_data,
-                &source_indices,
-                0,
-                &target_chunks
-            ),
+            find_match_compression_is_priority(source_data, &source_indices, 0, &target_chunks),
             Some((0, 2, 12, 0))
         );
     }
@@ -739,12 +749,7 @@ mod test {
         let source_indices = build_chunks_indices(&source_chunks);
 
         assert_eq!(
-            find_match_compression_is_priority(
-                source_data,
-                &source_indices,
-                0,
-                &target_chunks
-            ),
+            find_match_compression_is_priority(source_data, &source_indices, 0, &target_chunks),
             Some((0, 2, 12, 0))
         );
     }
@@ -758,12 +763,7 @@ mod test {
         let source_indices = build_chunks_indices(&source_chunks);
 
         assert_eq!(
-            find_match_compression_is_priority(
-                source_data,
-                &source_indices,
-                0,
-                &target_chunks
-            ),
+            find_match_compression_is_priority(source_data, &source_indices, 0, &target_chunks),
             Some((2, 3, 3, 0))
         );
     }
@@ -777,12 +777,7 @@ mod test {
         let source_indices = build_chunks_indices(&source_chunks);
 
         assert_eq!(
-            find_match_compression_is_priority(
-                source_data,
-                &source_indices,
-                0,
-                &target_chunks
-            ),
+            find_match_compression_is_priority(source_data, &source_indices, 0, &target_chunks),
             Some((0, 3, 13, 0))
         );
     }
@@ -798,13 +793,9 @@ mod test {
         let chunk_indices = build_chunks_indices(&source_chunks);
 
         assert_eq!(
-            find_match_compression_is_priority(
-                source_data,
-                &chunk_indices,
-                0,
-                &target_chunks,
-            ),
-            Some((11, 1, 11, 0)))
+            find_match_compression_is_priority(source_data, &chunk_indices, 0, &target_chunks,),
+            Some((11, 1, 11, 0))
+        )
     }
 
     #[test]
@@ -879,10 +870,7 @@ mod test {
     fn find_match_should_return_position_for_exact_match() {
         let data = b"__PATTERN1__PATTERN2__";
         let pattern = b"__PATTERN1_";
-        let chunks = vec![
-            &data[0..data.len() / 2],
-            &data[data.len() / 2..],
-        ];
+        let chunks = vec![&data[0..data.len() / 2], &data[data.len() / 2..]];
 
         let chunk_indices = build_chunks_indices(&chunks);
 
@@ -955,7 +943,10 @@ mod test {
         rng.fill(&mut data[..]);
 
         let chunks = gear_chunking(&data);
-        assert!(chunks.len() > 1, "Data should be split into multiple chunks");
+        assert!(
+            chunks.len() > 1,
+            "Data should be split into multiple chunks"
+        );
     }
 
     #[test]
@@ -968,7 +959,8 @@ mod test {
             data[15] = 0;
         }
 
-        let (sbc_map, sbc_key) = create_map_and_key(data.as_slice(), data2.as_slice(), SpeedIsPriority);
+        let (sbc_map, sbc_key) =
+            create_map_and_key(data.as_slice(), data2.as_slice(), SpeedIsPriority);
 
         assert_eq!(sbc_map.get(&sbc_key).unwrap(), data2);
     }
@@ -988,7 +980,8 @@ mod test {
             data[16] = 0;
         }
 
-        let (sbc_map, sbc_key) = create_map_and_key(data.as_slice(), data2.as_slice(), SpeedIsPriority);
+        let (sbc_map, sbc_key) =
+            create_map_and_key(data.as_slice(), data2.as_slice(), SpeedIsPriority);
 
         assert_eq!(sbc_map.get(&sbc_key).unwrap(), data2);
     }
@@ -1008,7 +1001,8 @@ mod test {
             data[106] = 0;
         }
 
-        let (sbc_map, sbc_key) = create_map_and_key(data.as_slice(), data2.as_slice(), CompressionIsPriority);
+        let (sbc_map, sbc_key) =
+            create_map_and_key(data.as_slice(), data2.as_slice(), CompressionIsPriority);
 
         assert_eq!(sbc_map.get(&sbc_key).unwrap(), data2);
     }
@@ -1018,7 +1012,8 @@ mod test {
         let data: Vec<u8> = generate_test_data();
         let data2 = data[15..].to_vec();
 
-        let (sbc_map, sbc_key) = create_map_and_key(data.as_slice(), data2.as_slice(), SpeedIsPriority);
+        let (sbc_map, sbc_key) =
+            create_map_and_key(data.as_slice(), data2.as_slice(), SpeedIsPriority);
 
         assert_eq!(sbc_map.get(&sbc_key).unwrap(), data2);
     }
@@ -1028,7 +1023,8 @@ mod test {
         let data: Vec<u8> = generate_test_data();
         let data2 = data[..8000].to_vec();
 
-        let (sbc_map, sbc_key) = create_map_and_key(data.as_slice(), data2.as_slice(), CompressionIsPriority);
+        let (sbc_map, sbc_key) =
+            create_map_and_key(data.as_slice(), data2.as_slice(), CompressionIsPriority);
 
         assert_eq!(sbc_map.get(&sbc_key).unwrap(), data2);
     }
@@ -1040,7 +1036,8 @@ mod test {
         data2[0] /= 3;
         data2[7000] /= 3;
 
-        let (sbc_map, sbc_key) = create_map_and_key(data.as_slice(), data2.as_slice(), CompressionIsPriority);
+        let (sbc_map, sbc_key) =
+            create_map_and_key(data.as_slice(), data2.as_slice(), CompressionIsPriority);
 
         assert_eq!(sbc_map.get(&sbc_key).unwrap(), data2);
     }
@@ -1051,7 +1048,8 @@ mod test {
         let mut data2 = data.clone();
         data2.extend(&data[8000..]);
 
-        let (sbc_map, sbc_key) = create_map_and_key(data.as_slice(), data2.as_slice(), SpeedIsPriority);
+        let (sbc_map, sbc_key) =
+            create_map_and_key(data.as_slice(), data2.as_slice(), SpeedIsPriority);
 
         assert_ne!(data, []);
         assert_eq!(
@@ -1070,7 +1068,8 @@ mod test {
         let mut data2 = data[..192].to_vec();
         data2.extend(&data);
 
-        let (sbc_map, sbc_key) = create_map_and_key(data.as_slice(), data2.as_slice(), SpeedIsPriority);
+        let (sbc_map, sbc_key) =
+            create_map_and_key(data.as_slice(), data2.as_slice(), SpeedIsPriority);
 
         assert_ne!(data, []);
         assert_eq!(
