@@ -1,6 +1,9 @@
 mod gdelta_encoder;
 mod levenshtein_encoder;
 mod xdelta_encoder;
+pub mod zdelta_encoder;
+mod zdelta_comprassion_error;
+pub mod zdelta_match_pointers;
 
 use super::chunkfs_sbc::{ClusterPoint, Clusters};
 use crate::decoder::Decoder;
