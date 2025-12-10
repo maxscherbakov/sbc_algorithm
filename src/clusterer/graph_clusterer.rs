@@ -2,6 +2,7 @@ use crate::chunkfs_sbc::{ClusterPoint, Clusters};
 use crate::clusterer::Clusterer;
 use crate::SBCHash;
 use std::collections::HashMap;
+use chunkfs::ClusteringMeasurements;
 
 /// A vertex in the graph used for clustering.
 ///
@@ -142,8 +143,9 @@ impl<Hash: SBCHash> Clusterer<Hash> for GraphClusterer {
     fn clusterize<'a>(
         &mut self,
         chunk_sbc_hash: Vec<ClusterPoint<'a, Hash>>,
-    ) -> Clusters<'a, Hash> {
+    ) -> (Clusters<'a, Hash>, ClusteringMeasurements) {
         let mut clusters: Clusters<Hash> = HashMap::default();
+        let measurements: ClusteringMeasurements = ClusteringMeasurements::default();
 
         for (sbc_hash, data_container) in chunk_sbc_hash {
             // Obtain u32 key for graph clustering from the hash
@@ -157,6 +159,6 @@ impl<Hash: SBCHash> Clusterer<Hash> for GraphClusterer {
             cluster.push((sbc_hash, data_container));
         }
 
-        clusters
+        (clusters, measurements)
     }
 }

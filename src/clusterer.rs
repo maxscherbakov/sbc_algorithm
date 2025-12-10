@@ -2,6 +2,7 @@ mod eq_clusterer;
 mod graph_clusterer;
 
 use crate::chunkfs_sbc::{ClusterPoint, Clusters};
+use chunkfs::ClusteringMeasurements;
 use crate::SBCHash;
 pub use eq_clusterer::EqClusterer;
 pub use graph_clusterer::GraphClusterer;
@@ -30,5 +31,5 @@ pub trait Clusterer<Hash: SBCHash> {
     ///
     /// A collection of clusters, where each cluster is a grouping of related chunks.
     fn clusterize<'a>(&mut self, chunk_sbc_hash: Vec<ClusterPoint<'a, Hash>>)
-        -> Clusters<'a, Hash>;
+        -> (Clusters<'a, Hash>, ClusteringMeasurements);
 }
