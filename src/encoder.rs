@@ -2,7 +2,7 @@ mod ddelta_encoder;
 mod gdelta_encoder;
 mod levenshtein_encoder;
 mod xdelta_encoder;
-mod zdelta_comprassion_error;
+pub mod zdelta_comprassion_error;
 pub mod zdelta_encoder;
 pub mod zdelta_match_pointers;
 
