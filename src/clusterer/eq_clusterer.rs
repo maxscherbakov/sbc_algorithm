@@ -1,5 +1,5 @@
 use crate::chunkfs_sbc::{ClusterPoint, Clusters};
-use crate::clusterer::Clusterer;
+use crate::clusterer::{calculate_distance_to_other_vertices, Clusterer};
 use crate::SBCHash;
 use chunkfs::ClusteringMeasurements;
 use std::collections::HashMap;
@@ -28,7 +28,7 @@ impl<Hash: SBCHash> Clusterer<Hash> for EqClusterer {
             total_cluster_size += 1;
         }
 
-        let distance_to_other_clusters = calculate_distance_to_other_clusters(parent_vertices);
+        let distance_to_other_clusters = calculate_distance_to_other_vertices(parent_vertices);
         let distance_to_vertices_in_cluster = HashMap::new();
         let cluster_dedup_ratio = HashMap::new();
         let number_of_clusters = total_cluster_size;
@@ -46,25 +46,6 @@ impl<Hash: SBCHash> Clusterer<Hash> for EqClusterer {
     }
 }
 
-fn calculate_distance_to_other_clusters(parent_vertices: Vec<u32>) -> HashMap<u32, Vec<usize>> {
-    let mut distance_to_other_clusters = HashMap::new();
-
-    for i in 0..parent_vertices.len() {
-        let mut distances = Vec::new();
-
-        for j in 0..parent_vertices.len() {
-            if i != j {
-                let distance = parent_vertices[i].abs_diff(parent_vertices[j]) as usize;
-                distances.push(distance);
-            }
-        }
-
-        distance_to_other_clusters.insert(parent_vertices[i], distances);
-    }
-
-    distance_to_other_clusters
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,7 +60,7 @@ mod tests {
     }
 
     #[test]
-    fn scrub_should_return_correct_scrub_measurements_for_copy_scrubber() {
+    fn scrub_should_return_correct_scrub_measurements_for_eq_clusterer() {
         let test_data = generate_test_data();
         let chunk_size = SizeParams::new(2 * 1024, 8 * 1024, 16 * 1024);
 
