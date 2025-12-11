@@ -75,7 +75,9 @@ mod tests {
             Sha256Hasher::default(),
         );
 
-        let mut handle = fs.create_file("file".to_string(), SuperChunker::new(chunk_size)).unwrap();
+        let mut handle = fs
+            .create_file("file".to_string(), SuperChunker::new(chunk_size))
+            .unwrap();
         fs.write_to_file(&mut handle, &test_data).unwrap();
         fs.close_file(handle).unwrap();
 
@@ -99,4 +101,3 @@ mod tests {
             .all(|&v| v == 0.0));
     }
 }
-

@@ -1082,7 +1082,6 @@ mod test {
         assert_eq!(sbc_map.get(&sbc_key).unwrap(), data2);
     }
 
-
     fn generate_test_data() -> Vec<u8> {
         const TEST_DATA_SIZE: usize = 8192;
         (0..TEST_DATA_SIZE).map(|_| rand::random::<u8>()).collect()

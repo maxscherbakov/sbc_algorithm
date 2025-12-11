@@ -224,11 +224,12 @@ mod tests {
             Sha256Hasher::default(),
         );
 
-        let mut handle = fs.create_file("file".to_string(), SuperChunker::new(chunk_size)).unwrap();
+        let mut handle = fs
+            .create_file("file".to_string(), SuperChunker::new(chunk_size))
+            .unwrap();
         fs.write_to_file(&mut handle, &data).unwrap();
         fs.close_file(handle).unwrap();
-
-         fs.scrub().unwrap()
+        fs.scrub().unwrap()
     }
 
     #[test]
@@ -260,7 +261,9 @@ mod tests {
         for (parent_key, &cluster_size) in &cluster_report.number_of_vertices_in_cluster {
             assert!(cluster_size > 0);
 
-            let cluster_points = &scrub_report.clusterization_report.distance_to_vertices_in_cluster[parent_key];
+            let cluster_points = &scrub_report
+                .clusterization_report
+                .distance_to_vertices_in_cluster[parent_key];
 
             // The parent vertex is ignored.
             assert_eq!(cluster_points.len(), cluster_size - 1);
@@ -273,13 +276,8 @@ mod tests {
         let scrub_report = create_scrub_report(test_data);
         let cluster_report = &scrub_report.clusterization_report;
 
-        let sum_vertices: usize = cluster_report
-            .number_of_vertices_in_cluster
-            .values().sum();
+        let sum_vertices = cluster_report.number_of_vertices_in_cluster.values().sum();
 
-        assert_eq!(
-            cluster_report.total_cluster_size,
-            sum_vertices,
-        );
+        assert_eq!(cluster_report.total_cluster_size, sum_vertices);
     }
 }

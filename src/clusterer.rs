@@ -1,12 +1,12 @@
 mod eq_clusterer;
 mod graph_clusterer;
 
-use std::collections::HashMap;
 use crate::chunkfs_sbc::{ClusterPoint, Clusters};
-use chunkfs::ClusteringMeasurements;
 use crate::SBCHash;
+use chunkfs::ClusteringMeasurements;
 pub use eq_clusterer::EqClusterer;
 pub use graph_clusterer::GraphClusterer;
+use std::collections::HashMap;
 
 /// A trait defining the clustering behavior for similarity-based chunking.
 ///
@@ -31,8 +31,10 @@ pub trait Clusterer<Hash: SBCHash> {
     /// # Returns
     ///
     /// A collection of clusters, where each cluster is a grouping of related chunks.
-    fn clusterize<'a>(&mut self, chunk_sbc_hash: Vec<ClusterPoint<'a, Hash>>)
-        -> (Clusters<'a, Hash>, ClusteringMeasurements);
+    fn clusterize<'a>(
+        &mut self,
+        chunk_sbc_hash: Vec<ClusterPoint<'a, Hash>>,
+    ) -> (Clusters<'a, Hash>, ClusteringMeasurements);
 }
 
 /// Accepts a vector consisting of vertices between which it is necessary to calculate the distances.
