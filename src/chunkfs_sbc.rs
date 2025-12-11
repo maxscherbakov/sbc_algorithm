@@ -296,7 +296,7 @@ where
 
         // 2. Clustering: group chunks by similarity
         let time_clusterize_start = time_start.elapsed();
-        let mut clusters = self
+        let (mut clusters, clusterization_report) = self
             .clusterer
             .clusterize(sbc_hash_chunk.into_inner().unwrap());
         let time_clusterize =
@@ -315,6 +315,7 @@ where
             processed_data,
             running_time,
             data_left,
+            clusterization_report,
         })
     }
 }
