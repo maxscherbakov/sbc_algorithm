@@ -61,7 +61,7 @@ impl XdeltaEncoder {
         chunk_data: &[u8],
         hash: Hash,
         parent_data: &[u8],
-        word_hash_offsets: &HashMap<u32, usize>,
+        word_hash_offsets: &HashMap<u32, Vec<usize>>,
         parent_hash: Hash,
     ) -> (usize, usize, SBCKey<Hash>) {
         let mut delta_code = Vec::new();
@@ -213,25 +213,44 @@ fn encode_copy_sequence(
     i: &mut usize,
     delta_code: &mut Vec<u8>,
     initial_hash: u32,
-    word_hash_offsets: &HashMap<u32, usize>,
+    word_hash_offsets: &HashMap<u32, Vec<usize>>,
 ) {
     if *i >= chunk_data.len() || !word_hash_offsets.contains_key(&initial_hash) {
         return;
     }
 
-    let mut equal_part_len = 0;
-    let offset = *word_hash_offsets.get(&initial_hash).unwrap();
-    let max_len = min(parent_data.len() - offset, chunk_data.len() - *i);
+    let offsets = match word_hash_offsets.get(&initial_hash) {
+        Some(v) => v,
+        None => return,
+    };
 
-    while equal_part_len < max_len
-        && parent_data[offset + equal_part_len] == chunk_data[*i + equal_part_len]
-    {
-        equal_part_len += 1;
+    let mut best_len = 0;
+    let mut best_offset = 0;
+
+    for &offset in offsets {
+        let max_len = min(parent_data.len() - offset, chunk_data.len() - *i);
+        let mut equal_part_len = 0;
+
+        while equal_part_len < max_len
+            && parent_data[offset + equal_part_len] == chunk_data[*i + equal_part_len]
+        {
+            equal_part_len += 1;
+        }
+
+        if equal_part_len > best_len {
+            best_len = equal_part_len;
+            best_offset = offset;
+        }
     }
 
-    if equal_part_len > 0 {
-        encode_copy_instruction(equal_part_len, offset, delta_code);
-        *i += equal_part_len;
+    if best_len > 0 {
+        encode_copy_instruction(best_len, best_offset, delta_code);
+        *i += best_len;
+    } else {
+        let end = min(*i + BLOCK_SIZE, chunk_data.len());
+        let insert_data = chunk_data[*i..end].to_vec();
+        encode_insert_instruction(insert_data, delta_code);
+        *i = end;
     }
 }
 
@@ -246,11 +265,11 @@ fn encode_copy_sequence(
 fn encode_insert_sequence(
     chunk_data: &[u8],
     i: &mut usize,
-    word_hash_offsets: &HashMap<u32, usize>,
+    word_hash_offsets: &HashMap<u32, Vec<usize>>,
     delta_code: &mut Vec<u8>,
     initial_hash: u32,
 ) {
-    if *i >= chunk_data.len() || word_hash_offsets.contains_key(&initial_hash) {
+    if *i >= chunk_data.len() {
         return;
     }
 
@@ -298,13 +317,16 @@ fn adler32(data: &[u8]) -> u32 {
 /// HashMap where:
 /// - Key: Adler32 hash of a block.
 /// - Value: First starting position of that block in source_data.
-fn create_block_hashmap(source_data: &[u8]) -> HashMap<u32, usize> {
+fn create_block_hashmap(source_data: &[u8]) -> HashMap<u32, Vec<usize>> {
     let mut i = 0;
     let mut block_position_map = HashMap::new();
 
     while i + BLOCK_SIZE <= source_data.len() {
         let block_hash = adler32(&source_data[i..i + BLOCK_SIZE]);
-        block_position_map.entry(block_hash).or_insert(i);
+        block_position_map
+            .entry(block_hash)
+            .or_insert_with(Vec::new)
+            .push(i);
         i += 1;
     }
 
@@ -317,6 +339,8 @@ mod test {
     use crate::decoder;
     use crate::encoder::encode_simple_chunk;
     use crate::hasher::AronovichHash;
+    use rand::prelude::StdRng;
+    use rand::{Rng, SeedableRng};
 
     const TEST_DATA_SIZE: usize = 8192;
 
@@ -338,7 +362,10 @@ mod test {
     fn create_block_hashmap_should_store_first_position_for_duplicate_blocks() {
         let data = b"abcdabcdabcdabcdabcdabcdabcdabcd";
         let result = create_block_hashmap(data);
-        assert_eq!(result.get(&adler32(b"abcdabcdabcdabcd")), Some(&0));
+        assert_eq!(
+            result.get(&adler32(b"abcdabcdabcdabcd")),
+            Some(&vec![0, 4, 8, 12, 16])
+        );
         assert_eq!(result.len(), 3);
     }
 
@@ -396,7 +423,7 @@ mod test {
         let chunk_data = vec![10; 16];
         let mut word_hash_offsets = HashMap::new();
         let hash = adler32(&chunk_data);
-        word_hash_offsets.insert(hash, 0);
+        word_hash_offsets.insert(hash, vec![0]);
 
         let mut delta_code = Vec::new();
         let mut i = 0;
@@ -421,7 +448,7 @@ mod test {
         let hash_second_block = adler32(&chunk_data[16..32]);
 
         let mut word_hash_offsets = HashMap::new();
-        word_hash_offsets.insert(hash_second_block, 16);
+        word_hash_offsets.insert(hash_second_block, vec![16]);
 
         let mut delta_code = Vec::new();
         let mut i = 0;
@@ -561,7 +588,7 @@ mod test {
 
     #[test]
     fn test_restore_similarity_chunk_1_byte_diff() {
-        let mut data: Vec<u8> = generate_test_data();
+        let mut data: Vec<u8> = generate_test_data_deterministic(13);
         let data2 = data.clone();
         if data[15] < 255 {
             data[15] = 255;
@@ -576,7 +603,7 @@ mod test {
 
     #[test]
     fn test_restore_similarity_chunk_2_neighbor_byte_diff() {
-        let mut data: Vec<u8> = generate_test_data();
+        let mut data: Vec<u8> = generate_test_data_deterministic(56);
         let data2 = data.clone();
         if data[15] < 255 {
             data[15] = 255;
@@ -596,7 +623,7 @@ mod test {
 
     #[test]
     fn test_restore_similarity_chunk_2_byte_diff() {
-        let mut data: Vec<u8> = generate_test_data();
+        let mut data: Vec<u8> = generate_test_data_deterministic(35);
         let data2 = data.clone();
         if data[15] < 255 {
             data[15] = 255;
@@ -609,14 +636,14 @@ mod test {
             data[106] = 0;
         }
 
-        let (sbc_map, sbc_key) = create_map_and_key(data.as_slice(), data2.as_slice());
+        let (sbc_map, sbc_key) = create_map_and_key(&data, &data2);
 
         assert_eq!(sbc_map.get(&sbc_key).unwrap(), data2);
     }
 
     #[test]
     fn test_restore_similarity_chunk_with_offset_left() {
-        let data: Vec<u8> = generate_test_data();
+        let data: Vec<u8> = generate_test_data_deterministic(41);
         let data2 = data[15..].to_vec();
 
         let (sbc_map, sbc_key) = create_map_and_key(data.as_slice(), data2.as_slice());
@@ -626,7 +653,7 @@ mod test {
 
     #[test]
     fn test_restore_similarity_chunk_with_offset_right() {
-        let data: Vec<u8> = generate_test_data();
+        let data: Vec<u8> = generate_test_data_deterministic(65);
         let data2 = data[..8000].to_vec();
 
         let (sbc_map, sbc_key) = create_map_and_key(data.as_slice(), data2.as_slice());
@@ -636,7 +663,7 @@ mod test {
 
     #[test]
     fn test_restore_similarity_chunk_with_offset() {
-        let data: Vec<u8> = generate_test_data();
+        let data: Vec<u8> = generate_test_data_deterministic(45);
         let mut data2 = data[15..8000].to_vec();
         data2[0] /= 3;
         data2[7000] /= 3;
@@ -648,7 +675,7 @@ mod test {
 
     #[test]
     fn test_restore_similarity_chunk_with_cyclic_shift_right() {
-        let data: Vec<u8> = generate_test_data();
+        let data: Vec<u8> = generate_test_data_deterministic(44);
         let mut data2 = data.clone();
         data2.extend(&data[8000..]);
 
@@ -667,7 +694,7 @@ mod test {
 
     #[test]
     fn test_restore_similarity_chunk_with_cyclic_shift_left() {
-        let data: Vec<u8> = generate_test_data();
+        let data: Vec<u8> = generate_test_data_deterministic(42);
         let mut data2 = data[..192].to_vec();
         data2.extend(&data);
 
@@ -684,8 +711,9 @@ mod test {
         assert_eq!(sbc_map.get(&sbc_key).unwrap(), data2);
     }
 
-    fn generate_test_data() -> Vec<u8> {
-        (0..TEST_DATA_SIZE).map(|_| rand::random::<u8>()).collect()
+    fn generate_test_data_deterministic(seed: u64) -> Vec<u8> {
+        let mut rng = StdRng::seed_from_u64(seed);
+        (0..TEST_DATA_SIZE).map(|_| rng.gen()).collect()
     }
 
     fn create_map_and_key<'a>(
