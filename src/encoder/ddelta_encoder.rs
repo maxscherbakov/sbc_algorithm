@@ -71,7 +71,7 @@ impl Encoder for DdeltaEncoder {
             let mut target_hash = SBCKey::default();
             match data_container.extract() {
                 Data::Chunk(data) => {
-                    let (left, processed, sbc_hash) = self.encode_delta_chunk(
+                    let (left_in_delta_chunk, processed_in_delta_chunk, sbc_hash) = self.encode_delta_chunk(
                         target_map.clone(),
                         data,
                         hash.clone(),
@@ -79,8 +79,8 @@ impl Encoder for DdeltaEncoder {
                         &mut source_chunks_indices,
                         parent_hash.clone(),
                     );
-                    data_left += left;
-                    processed_data += processed;
+                    data_left += left_in_delta_chunk;
+                    processed_data += processed_in_delta_chunk;
                     target_hash = sbc_hash;
                 }
                 Data::TargetChunk(_) => {}
@@ -193,11 +193,11 @@ fn process_target_chunk_with_edelta(
     match edelta_optimizations {
         EdeltaOptimizations::SpeedIsPriority => {
             if let Some((
-                start_match_position_in_source_data,
-                number_of_processed_chunks,
-                match_length,
-                length_of_unprocessed_residue,
-            )) = find_match_compression_is_priority(
+                            start_match_position_in_source_data,
+                            number_of_processed_chunks,
+                            match_length,
+                            length_of_unprocessed_residue,
+                        )) = find_match_compression_is_priority(
                 source_data,
                 source_chunks_indices,
                 *target_chunk_position,
@@ -227,11 +227,11 @@ fn process_target_chunk_with_edelta(
         }
         EdeltaOptimizations::CompressionIsPriority => {
             if let Some((
-                start_match_position_in_source_data,
-                number_of_processed_chunks,
-                match_length,
-                length_of_unprocessed_residue,
-            )) = find_match_compression_is_priority(
+                            start_match_position_in_source_data,
+                            number_of_processed_chunks,
+                            match_length,
+                            length_of_unprocessed_residue,
+                        )) = find_match_compression_is_priority(
                 source_data,
                 source_chunks_indices,
                 *target_chunk_position,
@@ -497,13 +497,13 @@ fn build_chunks_indices(source_chunks: &Vec<&[u8]>) -> HashMap<u64, usize> {
 fn gear_chunking(data: &[u8]) -> Vec<&[u8]> {
     let mut source_chunks: Vec<&[u8]> = Vec::new();
     let mut current_window_hash: u64 = 0;
-    let mut start_current_chunk: usize = 0;
+    let mut start_current_chunk = 0;
 
     let mask = (1 << AVERAGE_CHUNK_SIZE.next_power_of_two().trailing_zeros()) - 1;
-    let mut data_index: usize = 0;
+    let mut data_index = 0;
     while data_index < data.len() {
-        current_window_hash =
-            (current_window_hash << 1).wrapping_add(GEAR[data[data_index] as usize]);
+        current_window_hash = (current_window_hash << 1).wrapping_add(GEAR[data[data_index] as usize]);
+
         if (current_window_hash & mask) == CHUNK_THRESHOLD {
             source_chunks.push(&data[start_current_chunk..data_index]);
             start_current_chunk = data_index;
@@ -528,7 +528,8 @@ mod test {
     };
     use crate::encoder::encode_simple_chunk;
     use crate::hasher::AronovichHash;
-    use rand::Rng;
+    use rand::prelude::StdRng;
+    use rand::{Rng, SeedableRng};
 
     #[test]
     fn process_target_chunk_with_edelta_should_process_full_match_with_compression_priority() {
@@ -793,7 +794,7 @@ mod test {
         let chunk_indices = build_chunks_indices(&source_chunks);
 
         assert_eq!(
-            find_match_compression_is_priority(source_data, &chunk_indices, 0, &target_chunks,),
+            find_match_compression_is_priority(source_data, &chunk_indices, 0, &target_chunks, ),
             Some((11, 1, 11, 0))
         )
     }
@@ -1064,7 +1065,7 @@ mod test {
 
     #[test]
     fn test_restore_similarity_chunk_with_cyclic_shift_left() {
-        let data: Vec<u8> = generate_test_data();
+        let data: Vec<u8> = generate_test_data_deterministic(42);
         let mut data2 = data[..192].to_vec();
         data2.extend(&data);
 
@@ -1085,6 +1086,12 @@ mod test {
     fn generate_test_data() -> Vec<u8> {
         const TEST_DATA_SIZE: usize = 8192;
         (0..TEST_DATA_SIZE).map(|_| rand::random::<u8>()).collect()
+    }
+
+    fn generate_test_data_deterministic(seed: u64) -> Vec<u8> {
+        const TEST_DATA_SIZE: usize = 8192;
+        let mut rng = StdRng::seed_from_u64(seed);
+        (0..TEST_DATA_SIZE).map(|_| rng.gen()).collect()
     }
 
     fn create_map_and_key<'a>(
