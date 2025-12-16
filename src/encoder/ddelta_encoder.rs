@@ -71,14 +71,15 @@ impl Encoder for DdeltaEncoder {
             let mut target_hash = SBCKey::default();
             match data_container.extract() {
                 Data::Chunk(data) => {
-                    let (left_in_delta_chunk, processed_in_delta_chunk, sbc_hash) = self.encode_delta_chunk(
-                        target_map.clone(),
-                        data,
-                        hash.clone(),
-                        parent_data.as_slice(),
-                        &mut source_chunks_indices,
-                        parent_hash.clone(),
-                    );
+                    let (left_in_delta_chunk, processed_in_delta_chunk, sbc_hash) = self
+                        .encode_delta_chunk(
+                            target_map.clone(),
+                            data,
+                            hash.clone(),
+                            parent_data.as_slice(),
+                            &mut source_chunks_indices,
+                            parent_hash.clone(),
+                        );
                     data_left += left_in_delta_chunk;
                     processed_data += processed_in_delta_chunk;
                     target_hash = sbc_hash;
@@ -193,11 +194,11 @@ fn process_target_chunk_with_edelta(
     match edelta_optimizations {
         EdeltaOptimizations::SpeedIsPriority => {
             if let Some((
-                            start_match_position_in_source_data,
-                            number_of_processed_chunks,
-                            match_length,
-                            length_of_unprocessed_residue,
-                        )) = find_match_compression_is_priority(
+                start_match_position_in_source_data,
+                number_of_processed_chunks,
+                match_length,
+                length_of_unprocessed_residue,
+            )) = find_match_compression_is_priority(
                 source_data,
                 source_chunks_indices,
                 *target_chunk_position,
@@ -227,11 +228,11 @@ fn process_target_chunk_with_edelta(
         }
         EdeltaOptimizations::CompressionIsPriority => {
             if let Some((
-                            start_match_position_in_source_data,
-                            number_of_processed_chunks,
-                            match_length,
-                            length_of_unprocessed_residue,
-                        )) = find_match_compression_is_priority(
+                start_match_position_in_source_data,
+                number_of_processed_chunks,
+                match_length,
+                length_of_unprocessed_residue,
+            )) = find_match_compression_is_priority(
                 source_data,
                 source_chunks_indices,
                 *target_chunk_position,
@@ -502,7 +503,8 @@ fn gear_chunking(data: &[u8]) -> Vec<&[u8]> {
     let mask = (1 << AVERAGE_CHUNK_SIZE.next_power_of_two().trailing_zeros()) - 1;
     let mut data_index = 0;
     while data_index < data.len() {
-        current_window_hash = (current_window_hash << 1).wrapping_add(GEAR[data[data_index] as usize]);
+        current_window_hash =
+            (current_window_hash << 1).wrapping_add(GEAR[data[data_index] as usize]);
 
         if (current_window_hash & mask) == CHUNK_THRESHOLD {
             source_chunks.push(&data[start_current_chunk..data_index]);
@@ -794,7 +796,7 @@ mod test {
         let chunk_indices = build_chunks_indices(&source_chunks);
 
         assert_eq!(
-            find_match_compression_is_priority(source_data, &chunk_indices, 0, &target_chunks, ),
+            find_match_compression_is_priority(source_data, &chunk_indices, 0, &target_chunks),
             Some((11, 1, 11, 0))
         )
     }
